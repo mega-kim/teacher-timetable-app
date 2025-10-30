@@ -5,6 +5,7 @@ import io
 import gspread
 from google.oauth2.service_account import Credentials
 from datetime import datetime
+import json # 'json' 라이브러리 추가
 
 # --- 0. Streamlit 앱 기본 설정 ---
 st.set_page_config(layout="wide")
@@ -12,22 +13,15 @@ st.title("강사별 출강 현황 통합 시간표 📊")
 
 # --- 1. Google Sheets 인증 및 연결 ---
 
-# *** (수정됨) '평평한' Secrets 구조에서 11개 키를 직접 읽어와 딕셔너리 조립 ***
+# *** (수정됨) 'JSON 문자열'을 Secrets에서 통째로 읽어옴 ***
 try:
-    creds_dict = {
-        "type": st.secrets["gcp_type"],
-        "project_id": st.secrets["gcp_project_id"],
-        "private_key_id": st.secrets["gcp_private_key_id"],
-        "private_key": st.secrets["gcp_private_key"].replace('\\n', '\n'), # (중요) \n을 실제 줄바꿈으로 복원
-        "client_email": st.secrets["gcp_client_email"],
-        "client_id": st.secrets["gcp_client_id"],
-        "auth_uri": st.secrets["gcp_auth_uri"],
-        "token_uri": st.secrets["gcp_token_uri"],
-        "auth_provider_x509_cert_url": st.secrets["gcp_auth_provider_x509_cert_url"],
-        "client_x509_cert_url": st.secrets["gcp_client_x509_cert_url"],
-        "universe_domain": st.secrets["gcp_universe_domain"]
-    }
+    # 1. JSON 문자열을 'Secrets'에서 로드
+    creds_json_string = st.secrets["gcp_service_account_json"]
     
+    # 2. 문자열을 딕셔너리(JSON)로 변환
+    creds_dict = json.loads(creds_json_string)
+    
+    # 3. 나머지 Secrets 로드
     sheet_url = st.secrets["google_sheet_url"]
     admin_password = st.secrets["admin_password"]
     
@@ -194,12 +188,12 @@ if password_attempt == admin_password:
                 combined_master_df['개강일'] = combined_master_df['개강일'].astype(str)
                 combined_master_df = combined_master_df.drop_duplicates()
                 
-                st.write("4/4: 'master_data' 시트 업데이트 중...")
+                st.write("4.1/4: 'master_data' 시트 업데이트 중...")
                 ws_master.clear()
                 ws_master.update([combined_master_df.columns.values.tolist()] + combined_master_df.astype(str).values.tolist())
                 
                 if new_address_file:
-                    st.write("추가: 'address_book' 시트 업데이트 중...")
+                    st.write("4.2/4: 'address_book' 시트 업데이트 중...")
                     address_df = pd.read_excel(new_address_file, engine='openpyxl' if new_address_file.name.endswith('xlsx') else 'xlrd')
                     ws_address.clear()
                     ws_address.update([address_df.columns.values.tolist()] + address_df.astype(str).values.tolist())
