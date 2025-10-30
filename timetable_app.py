@@ -13,15 +13,23 @@ st.title("강사별 출강 현황 통합 시간표 📊")
 
 # --- 1. Google Sheets 인증 및 연결 ---
 
-# *** (수정됨) 'JSON 문자열'을 Secrets에서 통째로 읽어옴 ***
+# *** (수정됨) 11개의 '평평한' Secrets 키를 읽어와 딕셔너리 조립 ***
 try:
-    # 1. JSON 문자열을 'Secrets'에서 로드
-    creds_json_string = st.secrets["gcp_service_account_json"]
+    creds_dict = {
+        "type": st.secrets["gcp_type"],
+        "project_id": st.secrets["gcp_project_id"],
+        "private_key_id": st.secrets["gcp_private_key_id"],
+        # (중요) private_key의 \\n을 \n (실제 줄바꿈)으로 복원
+        "private_key": st.secrets["gcp_private_key"].replace('\\n', '\n'), 
+        "client_email": st.secrets["gcp_client_email"],
+        "client_id": st.secrets["gcp_client_id"],
+        "auth_uri": st.secrets["gcp_auth_uri"],
+        "token_uri": st.secrets["gcp_token_uri"],
+        "auth_provider_x509_cert_url": st.secrets["gcp_auth_provider_x509_cert_url"],
+        "client_x509_cert_url": st.secrets["gcp_client_x509_cert_url"],
+        "universe_domain": st.secrets["gcp_universe_domain"]
+    }
     
-    # 2. 문자열을 딕셔너리(JSON)로 변환
-    creds_dict = json.loads(creds_json_string)
-    
-    # 3. 나머지 Secrets 로드
     sheet_url = st.secrets["google_sheet_url"]
     admin_password = st.secrets["admin_password"]
     
