@@ -13,15 +13,23 @@ st.title("강사별 출강 현황 통합 시간표 📊")
 
 # --- 1. Google Sheets 인증 및 연결 ---
 
-# *** (수정됨) 'JSON 문자열'을 Secrets에서 통째로 읽어옴 ***
+# *** (수정됨) 11개의 '평평한' Secrets 키를 읽어와 딕셔너리 조립 ***
 try:
-    # 1. JSON 문자열을 'Secrets'에서 로드
-    creds_json_string = st.secrets["gcp_service_account_json"]
+    creds_dict = {
+        "type": st.secrets["gcp_type"],
+        "project_id": st.secrets["gcp_project_id"],
+        "private_key_id": st.secrets["gcp_private_key_id"],
+        # (중요) private_key의 \\n을 \n (실제 줄바꿈)으로 복원
+        "private_key": st.secrets["gcp_private_key"].replace('\\n', '\n'), 
+        "client_email": st.secrets["gcp_client_email"],
+        "client_id": st.secrets["gcp_client_id"],
+        "auth_uri": st.secrets["gcp_auth_uri"],
+        "token_uri": st.secrets["gcp_token_uri"],
+        "auth_provider_x509_cert_url": st.secrets["gcp_auth_provider_x509_cert_url"],
+        "client_x509_cert_url": st.secrets["gcp_client_x509_cert_url"],
+        "universe_domain": st.secrets["gcp_universe_domain"]
+    }
     
-    # 2. 문자열을 딕셔너리(JSON)로 변환
-    creds_dict = json.loads(creds_json_string)
-    
-    # 3. 나머지 Secrets 로드
     sheet_url = st.secrets["google_sheet_url"]
     admin_password = st.secrets["admin_password"]
     
@@ -183,17 +191,17 @@ if password_attempt == admin_password:
                     
                 new_master_df = pd.concat(new_dataframes, ignore_index=True)
                 
-                st.write("3/4: 데이터 병합 및 중복 제거 중...")
+                st.write("3.1/4: 데이터 병합 및 중복 제거 중...")
                 combined_master_df = pd.concat([existing_master_df, new_master_df], ignore_index=True)
                 combined_master_df['개강일'] = combined_master_df['개강일'].astype(str)
                 combined_master_df = combined_master_df.drop_duplicates()
                 
-                st.write("4.1/4: 'master_data' 시트 업데이트 중...")
+                st.write("3.2/4: 'master_data' 시트 업데이트 중...")
                 ws_master.clear()
                 ws_master.update([combined_master_df.columns.values.tolist()] + combined_master_df.astype(str).values.tolist())
                 
                 if new_address_file:
-                    st.write("4.2/4: 'address_book' 시트 업데이트 중...")
+                    st.write("4/4: 'address_book' 시트 업데이트 중...")
                     address_df = pd.read_excel(new_address_file, engine='openpyxl' if new_address_file.name.endswith('xlsx') else 'xlrd')
                     ws_address.clear()
                     ws_address.update([address_df.columns.values.tolist()] + address_df.astype(str).values.tolist())
@@ -289,7 +297,7 @@ with col2:
             timetable_pivot = timetable_agg.pivot(index='시간대', columns='요일', values='수업정보')
             display_df = timetable_pivot.reindex(columns=days, index=time_slots, fill_value="")
             
-            st.markdown(display_df.to_html(escape=False, na_rep=""), unsafe_allow_html=True)
+            st.markdown(display_df.to_html(escape=False, na_rep=""), unsafe_allow_human=True)
         
         except Exception as e:
             st.error(f"시간표를 그리는 중 오류 발생: {e}")
