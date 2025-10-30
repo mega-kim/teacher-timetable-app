@@ -5,3 +5,4 @@ xlrd
 lxml
 html5lib
 gspread
+xlsxwriter
