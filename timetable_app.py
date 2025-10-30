@@ -12,11 +12,22 @@ st.title("강사별 출강 현황 통합 시간표 📊")
 
 # --- 1. Google Sheets 인증 및 연결 ---
 
-# Streamlit의 'Secrets'에서 Google Cloud 인증 키와 시트 URL을 안전하게 불러옵니다.
-# 이 부분은 로컬 테스트(localhost)에서는 작동하지 않으며, Streamlit Cloud에 배포해야 합니다.
+# *** (수정됨) '평평한' Secrets 구조에서 11개 키를 직접 읽어와 딕셔너리 조립 ***
 try:
-    # Streamlit Cloud에서 'Secrets'를 읽어옴
-    creds_dict = st.secrets["gcp_service_account"]
+    creds_dict = {
+        "type": st.secrets["gcp_type"],
+        "project_id": st.secrets["gcp_project_id"],
+        "private_key_id": st.secrets["gcp_private_key_id"],
+        "private_key": st.secrets["gcp_private_key"].replace('\\n', '\n'), # (중요) \n을 실제 줄바꿈으로 복원
+        "client_email": st.secrets["gcp_client_email"],
+        "client_id": st.secrets["gcp_client_id"],
+        "auth_uri": st.secrets["gcp_auth_uri"],
+        "token_uri": st.secrets["gcp_token_uri"],
+        "auth_provider_x509_cert_url": st.secrets["gcp_auth_provider_x509_cert_url"],
+        "client_x509_cert_url": st.secrets["gcp_client_x509_cert_url"],
+        "universe_domain": st.secrets["gcp_universe_domain"]
+    }
+    
     sheet_url = st.secrets["google_sheet_url"]
     admin_password = st.secrets["admin_password"]
     
@@ -24,7 +35,6 @@ try:
     credentials = Credentials.from_service_account_info(creds_dict, scopes=scopes)
     gc = gspread.authorize(credentials)
     
-    # Google Sheet URL을 열고, 2개의 시트를 변수로 지정
     sh = gc.open_by_url(sheet_url)
     ws_master = sh.worksheet('master_data')
     ws_address = sh.worksheet('address_book')
@@ -32,10 +42,10 @@ try:
 except Exception as e:
     st.error("Google Sheets 인증에 실패했습니다. Streamlit Cloud의 'Secrets' 설정이 올바른지 확인하세요.")
     st.error(f"오류: {e}")
-    st.stop() # 인증 실패 시 앱 중지
+    st.stop()
+# *** (수정 끝) ***
 
 # --- 2. 엑셀 다운로드 함수 ---
-# (요청하신 엑셀 다운로드 기능)
 @st.cache_data
 def convert_df_to_excel(df):
     output = io.BytesIO()
@@ -51,9 +61,7 @@ def load_data_from_gs():
     master_df = pd.DataFrame(ws_master.get_all_records())
     address_df = pd.DataFrame(ws_address.get_all_records())
     
-    # 'master_data'와 'address_book'을 강사명 기준으로 병합
     if not master_df.empty and not address_df.empty:
-        # '강사명' 컬럼이 없는 경우를 대비하여 '강사' 컬럼 사용
         if '강사명' not in master_df.columns:
             master_df['강사명'] = master_df['강사']
         if '강사명' not in address_df.columns:
@@ -65,7 +73,6 @@ def load_data_from_gs():
     elif not master_df.empty:
         master_df['자택 주소'] = '정보 없음'
         
-    # '최초 개강일' 계산 (신규 강사 확인용)
     if '개강일' in master_df.columns:
         master_df['개강일_dt'] = pd.to_datetime(master_df['개강일'], errors='coerce')
         df_first_appearance = master_df.groupby('강사')['개강일_dt'].min().reset_index()
@@ -81,7 +88,6 @@ def process_new_lecture_file(file):
     """업로드된 신규 강좌 파일(xls, xlsx, html)을 가공하여 DataFrame으로 반환"""
     df_list = []
     
-    # 1. 파일 읽기 (엑셀/HTML 자동 감지)
     try:
         file_bytes = file.getvalue()
         file_extension = file.name.split('.')[-1].lower()
@@ -89,13 +95,11 @@ def process_new_lecture_file(file):
         if file_extension == 'xls':
             engine = 'xlrd'
         
-        # 1차: 엑셀 읽기
         df = pd.read_excel(io.BytesIO(file_bytes), header=1, engine=engine)
     except Exception as e:
         if "Expected BOF record" in str(e) or "Unsupported format" in str(e) or "corrupt file" in str(e):
             st.warning(f"'{file.name}'은(는) Excel 형식이 아닙니다. HTML로 읽기를 시도합니다.")
             try:
-                # 2차: HTML 읽기 (인코딩 자동 시도)
                 try:
                     df_list_html = pd.read_html(io.BytesIO(file_bytes), header=1, encoding='utf-8')
                 except UnicodeDecodeError:
@@ -112,11 +116,9 @@ def process_new_lecture_file(file):
             st.error(f"'{file.name}' 파일 로드 오류: {e}.")
             return pd.DataFrame()
     
-    # 2. 1차 필터링
     df = df[df['판매'] != '폐강']
     df = df[~df['강좌구분'].astype(str).str.contains('코어')]
 
-    # 3. 2차 가공
     df['개강일'] = pd.to_datetime(df['개강일'], errors='coerce')
     df['연도'] = df['개강일'].dt.year.fillna(0).astype(int).astype(str)
     df['월'] = df['과정'].astype(str).str.extract(r'(\d+월)')
@@ -125,7 +127,6 @@ def process_new_lecture_file(file):
     df['월'] = df['월'].replace('0월', pd.NA)
     df['학원'] = df['학원'].astype(str).str.replace('러셀', '').str.replace('CORE', '').str.strip()
 
-    # 4. 시간표 분리
     df_exploded = df.assign(수업시간_분리=df['수업시간'].astype(str).str.split('\n')).explode('수업시간_분리')
     df_exploded['요일'] = df_exploded['수업시간_분리'].str.extract(r'([월화수목금토일])')
     df_exploded['시작시간'] = df_exploded['수업시간_분리'].str.extract(r'(\d{2}:\d{2})')
@@ -140,14 +141,12 @@ def process_new_lecture_file(file):
             
     df_exploded['시간대'] = df_exploded['시작시간'].apply(map_time_slot)
 
-    # 5. 최종 데이터 선택
-    final_columns = ['연도', '월', '강사', '과목', '요일', '시간대', '학원', '강좌구분', '개강일'] # '개강일' 포함 (신규강사 확인용)
+    final_columns = ['연도', '월', '강사', '과목', '요일', '시간대', '학원', '강좌구분', '개강일']
     df_processed = df_exploded[final_columns].copy()
     
     df_processed = df_processed.dropna(subset=['연도', '월', '강사', '요일', '시간대'])
     df_processed = df_processed.drop_duplicates()
     
-    # '개강일'은 날짜 형식이 깨질 수 있으므로 문자열로 변환
     df_processed['개강일'] = df_processed['개강일'].astype(str)
 
     return df_processed
@@ -175,11 +174,9 @@ if password_attempt == admin_password:
     if st.sidebar.button("[DB 갱신하기]"):
         with st.spinner("데이터베이스 갱신 중... (기존 데이터 + 신규 데이터)"):
             try:
-                # 1. 기존 master_data 로드
                 st.write("1/4: 기존 마스터 데이터 로드 중...")
                 existing_master_df = pd.DataFrame(ws_master.get_all_records())
                 
-                # 2. 신규 강좌 파일 가공
                 st.write("2/4: 신규 강좌 파일 가공 중...")
                 new_dataframes = []
                 for file in new_lecture_files:
@@ -192,20 +189,15 @@ if password_attempt == admin_password:
                     
                 new_master_df = pd.concat(new_dataframes, ignore_index=True)
                 
-                # 3. 데이터 병합 (기존 + 신규)
                 st.write("3/4: 데이터 병합 및 중복 제거 중...")
                 combined_master_df = pd.concat([existing_master_df, new_master_df], ignore_index=True)
-                # (중요) 날짜 형식을 문자열로 통일 (JSON 저장 오류 방지)
                 combined_master_df['개강일'] = combined_master_df['개강일'].astype(str)
-                # (중요) 중복 데이터 제거
                 combined_master_df = combined_master_df.drop_duplicates()
                 
-                # 4. Google Sheet에 덮어쓰기 (Master Data)
                 st.write("4/4: 'master_data' 시트 업데이트 중...")
                 ws_master.clear()
-                ws_master.update([combined_master_df.columns.values.tolist()] + combined_master_df.astype(str).values.tolist()) # NaN을 'nan' 문자열로 저장
+                ws_master.update([combined_master_df.columns.values.tolist()] + combined_master_df.astype(str).values.tolist())
                 
-                # 5. 주소록 갱신 (Address Book)
                 if new_address_file:
                     st.write("추가: 'address_book' 시트 업데이트 중...")
                     address_df = pd.read_excel(new_address_file, engine='openpyxl' if new_address_file.name.endswith('xlsx') else 'xlrd')
@@ -214,8 +206,8 @@ if password_attempt == admin_password:
 
                 st.success("데이터베이스 갱신 완료!")
                 st.info("데이터 캐시를 삭제합니다. 1분 후 앱이 자동 갱신됩니다.")
-                st.cache_data.clear() # 캐시 삭제
-                st.experimental_rerun() # 앱 새로고침
+                st.cache_data.clear()
+                st.experimental_rerun()
 
             except Exception as e:
                 st.error(f"DB 갱신 중 오류 발생: {e}")
@@ -268,7 +260,6 @@ with col1:
         st.warning("검색 결과가 없습니다.")
         selected_instructor = None
     else:
-        # 신규 강사 포맷팅 함수
         month_start_date = pd.to_datetime(f'{selected_year}-{selected_month.replace("월","")}-01', format='%Y-%m-%d', errors='coerce')
         def format_instructor_name(instructor_name):
             first_lecture_date = master_data.loc[master_data['강사'] == instructor_name, '최초 개강일'].min()
@@ -294,7 +285,6 @@ with col2:
         time_slots = ['오전', '오후', '저녁']
         
         try:
-            # 시간표 그리드 생성
             timetable_agg = instructor_data.groupby(['시간대', '요일']).apply(
                 lambda x: "<br><br>".join(
                     f"<b>{row['학원']}</b><br>{row['과목']}<br>({row['강좌구분']})"
@@ -311,7 +301,6 @@ with col2:
             st.error(f"시간표를 그리는 중 오류 발생: {e}")
             st.dataframe(instructor_data)
 
-        # 강사 부가 정보
         st.subheader("강사 정보")
         instructor_info = master_data[master_data['강사'] == selected_instructor].iloc[0]
         
@@ -326,7 +315,6 @@ with col2:
         - **강사 상태**: {"신규 강사" if is_new else "기존 강사"} (최초 개강일: {first_lecture_date.strftime('%Y-%m-%d') if pd.notna(first_lecture_date) else '-'} )
         """)
         
-        # 엑셀 다운로드 버튼
         st.subheader("데이터 다운로드")
         excel_data = convert_df_to_excel(instructor_data)
         st.download_button(
