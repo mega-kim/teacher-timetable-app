@@ -31,12 +31,8 @@ CUSTOM_CSS = """
         table-layout: fixed; /* 테이블 레이아웃 고정 */
         width: 80%; /* (수정됨) 100% -> 80%로 가로 폭 축소 */
         border-collapse: collapse;
-        /* (추가) 테이블을 우측 패널의 중앙에 배치 (선택 사항) */
-        /* margin-left: auto; */
-        /* margin-right: auto; */
     }
     table.timetable-grid th { /* 요일 헤더 (월~일) */
-        /* (수정됨) 너비 계산 변경 (80% 기준) */
         width: 12.8%; 
         text-align: center; /* 헤더 중앙 정렬 */
         vertical-align: middle; /* 헤더 중앙 정렬 */
@@ -296,7 +292,7 @@ if password_attempt == admin_password:
 elif password_attempt:
     st.sidebar.error("비밀번호가 틀렸습니다.")
 
-# --- 6. 메인 화면 (데이터 로드 및 필터) ---
+# --- 6. 메인 화면 (데이터 로드) ---
 try:
     master_data, mapping_data = load_data_from_gs() 
 except Exception as e:
@@ -310,48 +306,66 @@ if master_data.empty:
 if mapping_data.empty:
     st.warning("경고: 'subject_mapping' 시트가 비어있습니다. 필터가 작동하지 않을 수 있습니다.")
 
-# --- 7. 상단 필터 ( '강사 선택 유지' 로직 추가 ) ---
-# 세션 상태 초기화 (선택된 강사)
+# --- 7. (수정됨) 좌우 패널 레이아웃 ---
 if 'selected_instructor' not in st.session_state:
     st.session_state.selected_instructor = None
 
-all_years = sorted(master_data['연도'].astype(str).unique(), reverse=True)
-selected_year = st.selectbox("연도 선택", all_years)
+# (수정됨) [1, 3] 비율로 변경
+col1, col2 = st.columns([1, 3]) 
 
-all_months = sorted(master_data[master_data['연도'].astype(str) == selected_year]['월'].astype(str).unique())
-selected_month = st.selectbox("월 선택", all_months)
-
-filtered_data = master_data[
-    (master_data['연도'].astype(str) == selected_year) & 
-    (master_data['월'].astype(str) == selected_month)
-]
-
-# --- 8. 좌측 탐색 패널 ( '필터 로직' 전체 수정됨 ) ---
-# (수정됨) col1, col2 비율 [1, 1.5]로 변경
-col1, col2 = st.columns([1, 1.5]) 
-
+# --- 8. (수정됨) 좌측 탐색 패널 (모든 필터 통합) ---
 with col1:
-    st.header("Step 2: 강사 탐색")
-
-    # --- [필터 1] 영역 선택 ---
-    hardcoded_area_order = ['[영역 전체]', '국어', '수학', '영어', '사회탐구', '과학탐구', '논술&제2외국어', '한국사']
     
+    # --- (수정됨) Row 1: Year/Month ---
+    all_years = sorted(master_data['연도'].astype(str).unique(), reverse=True)
+    # (수정) selected_year가 세션에 없으면 all_years[0]을 사용
+    default_year = st.session_state.get('year_select', all_years[0])
+    if default_year not in all_years:
+        default_year = all_years[0]
+    
+    r1_col1, r1_col2 = st.columns(2)
+    with r1_col1:
+        selected_year = st.selectbox("연도", all_years, 
+                                     index=all_years.index(default_year), 
+                                     key="year_select")
+    with r1_col2:
+        all_months = sorted(master_data[master_data['연도'].astype(str) == selected_year]['월'].astype(str).unique())
+        # (수정) selected_month가 세션에 없으면 all_months[0]을 사용
+        default_month = st.session_state.get('month_select', all_months[0])
+        if default_month not in all_months:
+            default_month = all_months[0]
+            
+        selected_month = st.selectbox("월", all_months, 
+                                      index=all_months.index(default_month), 
+                                      key="month_select")
+
+    # (수정) filtered_data가 좌측 패널 상단에서 계산됨
+    filtered_data = master_data[
+        (master_data['연도'].astype(str) == selected_year) & 
+        (master_data['월'].astype(str) == selected_month)
+    ]
+    
+    st.divider() # 구분선
+
+    # --- (수정됨) Row 2: Area/Subject ---
+    hardcoded_area_order = ['[영역 전체]', '국어', '수학', '영어', '사회탐구', '과학탐구', '논술&제2외국어', '한국사']
     available_areas_in_mapping = list(mapping_data['영역'].unique())
     available_areas_in_data = list(master_data['영역'].unique())
     all_available_areas = sorted(list(set(available_areas_in_mapping + available_areas_in_data)))
-
     area_list = [area for area in hardcoded_area_order if area in all_available_areas]
     other_areas = [area for area in all_available_areas if area not in hardcoded_area_order and area != '[영역 전체]']
     area_list.extend(other_areas)
     
-    selected_area = st.selectbox("1. 영역 선택", area_list)
+    r2_col1, r2_col2 = st.columns(2)
+    with r2_col1:
+        selected_area = st.selectbox("영역", area_list, key="area_select")
 
+    # [필터 2] 로직
     if selected_area == '[영역 전체]':
         data_after_area_filter = filtered_data
     else:
         data_after_area_filter = filtered_data[filtered_data['영역'] == selected_area]
 
-    # --- [필터 2] 선택과목 선택 ---
     subject_list = []
     disable_subject_filter = False
     
@@ -359,10 +373,9 @@ with col1:
         subject_list = ['[과목 전체]']
         disable_subject_filter = True
     elif selected_area in ['국어', '수학', '영어', '한국사']:
-        subject_list = [selected_area] # *** (수정됨) '[...만 보기]' -> '국어' 등으로 변경
+        subject_list = [selected_area] # (수정됨) 텍스트 변경
         disable_subject_filter = True
     else:
-        # 사탐, 과탐, 논술
         subjects_in_mapping = list(mapping_data[mapping_data['영역'] == selected_area]['선택과목'].unique())
         subjects_in_data = list(data_after_area_filter[data_after_area_filter['영역'] == selected_area]['과목'].unique())
         ordered_subject_list = [subject for subject in subjects_in_mapping if subject in subjects_in_data]
@@ -373,7 +386,8 @@ with col1:
         else: # 사탐, 과탐
              subject_list = ['전체'] + ordered_subject_list + other_subjects
     
-    selected_subject = st.selectbox("2. 선택과목 선택", subject_list, disabled=disable_subject_filter)
+    with r2_col2:
+        selected_subject = st.selectbox("선택과목", subject_list, disabled=disable_subject_filter, key="subject_select")
 
     # 2차: '선택과목'으로 데이터 필터링
     if selected_area == '[영역 전체]' or disable_subject_filter:
@@ -383,8 +397,8 @@ with col1:
     else:
         data_after_subject_filter = data_after_area_filter[data_after_area_filter['과목'] == selected_subject]
 
-    # --- [필터 3] 강사명 검색 ---
-    search_query = st.text_input("3. 강사명 검색 🔍")
+    # --- (수정됨) Row 3: 강사명 검색 ---
+    search_query = st.text_input("강사명 검색 🔍", key="search_query")
 
     if search_query:
         searched_data = data_after_subject_filter[
@@ -393,7 +407,9 @@ with col1:
     else:
         searched_data = data_after_subject_filter
     
-    # --- [결과] 강사 목록 ( '선택 유지' 로직 추가 ) ---
+    st.divider() # 구분선
+
+    # --- (수정됨) Row 4: 강사 목록 (스크롤) ---
     instructors_list = sorted(searched_data['강사'].unique())
 
     if not instructors_list:
@@ -412,14 +428,18 @@ with col1:
                 if first_lecture_date >= month_start_date:
                     return f"{instructor_name} (신규)"
             return f"{instructor_name} (기존)"
-
-        selected_instructor = st.radio(
-            f"강사 선택 (결과: {len(instructors_list)}명)", 
-            instructors_list,
-            format_func=format_instructor_name,
-            index=default_index, 
-            key='instructor_radio'
-        )
+        
+        # (수정됨) st.container(height=400) 추가
+        st.markdown(f"**강사 선택** (결과: {len(instructors_list)}명)")
+        with st.container(height=400):
+            selected_instructor = st.radio(
+                f"강사 선택 (결과: {len(instructors_list)}명)", 
+                instructors_list,
+                format_func=format_instructor_name,
+                index=default_index, 
+                key='instructor_radio',
+                label_visibility="collapsed" # 라벨 숨기기
+            )
         st.session_state.selected_instructor = selected_instructor # 세션에 현재 선택 저장
 
 # --- 9. 우측 시간표 패널 ( '요일 헤더 삭제' 및 '과목명 숨기기' 수정됨 ) ---
@@ -439,7 +459,7 @@ with col2:
                 for _, row in x.iterrows():
                     subject_display = "" # Default: empty
                     # (수정) '영역'이 국/수/영이 아닌 경우에만 과목명 표시
-                    if row['영역'] not in ['국어', '수학', '영어']:
+                    if row['영역'] not in ['국어', '수학', '영어', '한국사']:
                         subject_display = f"{row['과목']}<br>"
                     
                     entries.append(
