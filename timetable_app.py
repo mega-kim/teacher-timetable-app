@@ -29,11 +29,15 @@ CUSTOM_CSS = """
     /* 시간표 그리드 고정 (가장 중요) */
     table.timetable-grid { /* CSS 클래스 지정 */
         table-layout: fixed; /* 테이블 레이아웃 고정 */
-        width: 100%;
+        width: 80%; /* (수정됨) 100% -> 80%로 가로 폭 축소 */
         border-collapse: collapse;
+        /* (추가) 테이블을 우측 패널의 중앙에 배치 (선택 사항) */
+        /* margin-left: auto; */
+        /* margin-right: auto; */
     }
     table.timetable-grid th { /* 요일 헤더 (월~일) */
-        width: 12.8%; /* (100% - 10%) / 7 */
+        /* (수정됨) 너비 계산 변경 (80% 기준) */
+        width: 12.8%; 
         text-align: center; /* 헤더 중앙 정렬 */
         vertical-align: middle; /* 헤더 중앙 정렬 */
         font-size: 1.0rem; 
@@ -112,7 +116,7 @@ def convert_df_to_excel(df):
     processed_data = output.getvalue()
     return processed_data
 
-# --- 3. Google Sheet 데이터 로드 함수 (*** '중복 제거' 로직 수정됨 ***) ---
+# --- 3. Google Sheet 데이터 로드 함수 ( '중복 제거' 로직 ) ---
 @st.cache_data(ttl=60) # 60초마다 캐시 갱신
 def load_data_from_gs():
     """Google Sheet에서 3개의 탭을 모두 읽어 DataFrame으로 반환"""
@@ -120,11 +124,10 @@ def load_data_from_gs():
     address_df = pd.DataFrame(ws_address.get_all_records())
     mapping_df = pd.DataFrame(ws_mapping.get_all_records())
     
-    # *** (수정됨) 로드 시점에 즉시 중복 제거 (강라현 강사 문제 해결) ***
+    # 로드 시점에 즉시 중복 제거
     if not master_df.empty:
         key_columns = ['연도', '월', '강사', '과목', '요일', '시간대', '학원', '강좌구분']
         existing_key_columns = [col for col in key_columns if col in master_df.columns]
-        # (수정) keep='first'를 추가하여 안정적으로 첫 번째 데이터 유지
         master_df = master_df.drop_duplicates(subset=existing_key_columns, keep='first')
     
     # '자택 주소' 병합 로직
@@ -152,8 +155,7 @@ def load_data_from_gs():
             master_df['선택과목'] = master_df['과목'] 
         else:
             master_df = pd.merge(master_df, mapping_df[['선택과목', '영역']], left_on='과목', right_on='선택과목', how='left')
-            # *** (수정됨) '기타 (미분류)' -> '한국사'로 변경 ***
-            master_df['영역'] = master_df['영역'].fillna('한국사') 
+            master_df['영역'] = master_df['영역'].fillna('한국사') # '기타' -> '한국사'로
     else:
         master_df['영역'] = '기타'
         master_df['선택과목'] = master_df['과목']
@@ -263,7 +265,6 @@ if password_attempt == admin_password:
                 combined_master_df = pd.concat([existing_master_df, new_master_df], ignore_index=True)
                 combined_master_df['개강일'] = combined_master_df['개강일'].astype(str)
                 
-                # (수정됨) '개강일'을 제외하고 중복 제거
                 key_columns = ['연도', '월', '강사', '과목', '요일', '시간대', '학원', '강좌구분']
                 existing_key_columns = [col for col in key_columns if col in combined_master_df.columns]
                 combined_master_df = combined_master_df.drop_duplicates(subset=existing_key_columns, keep='first')
@@ -309,8 +310,8 @@ if master_data.empty:
 if mapping_data.empty:
     st.warning("경고: 'subject_mapping' 시트가 비어있습니다. 필터가 작동하지 않을 수 있습니다.")
 
-# --- 7. 상단 필터 (*** '강사 선택 유지' 로직 추가 ***) ---
-# (수정) 세션 상태 초기화 (선택된 강사)
+# --- 7. 상단 필터 ( '강사 선택 유지' 로직 추가 ) ---
+# 세션 상태 초기화 (선택된 강사)
 if 'selected_instructor' not in st.session_state:
     st.session_state.selected_instructor = None
 
@@ -325,8 +326,9 @@ filtered_data = master_data[
     (master_data['월'].astype(str) == selected_month)
 ]
 
-# --- 8. 좌측 탐색 패널 (*** '필터 로직' 전체 수정됨 ***) ---
-col1, col2 = st.columns([1, 3])
+# --- 8. 좌측 탐색 패널 ( '필터 로직' 전체 수정됨 ) ---
+# (수정됨) col1, col2 비율 [1, 1.5]로 변경
+col1, col2 = st.columns([1, 1.5]) 
 
 with col1:
     st.header("Step 2: 강사 탐색")
@@ -350,7 +352,6 @@ with col1:
         data_after_area_filter = filtered_data[filtered_data['영역'] == selected_area]
 
     # --- [필터 2] 선택과목 선택 ---
-    # (수정됨) 국/수/영/한은 비활성화, 논술은 '전체' 제거
     subject_list = []
     disable_subject_filter = False
     
@@ -358,7 +359,7 @@ with col1:
         subject_list = ['[과목 전체]']
         disable_subject_filter = True
     elif selected_area in ['국어', '수학', '영어', '한국사']:
-        subject_list = ['[' + selected_area + '만 보기]'] # 플레이스홀더
+        subject_list = [selected_area] # *** (수정됨) '[...만 보기]' -> '국어' 등으로 변경
         disable_subject_filter = True
     else:
         # 사탐, 과탐, 논술
@@ -367,7 +368,6 @@ with col1:
         ordered_subject_list = [subject for subject in subjects_in_mapping if subject in subjects_in_data]
         other_subjects = sorted([subject for subject in subjects_in_data if subject not in ordered_subject_list])
         
-        # (수정) 논술&제2외국어는 '전체' 옵션 제거
         if selected_area == '논술&제2외국어':
              subject_list = ordered_subject_list + other_subjects
         else: # 사탐, 과탐
@@ -393,7 +393,7 @@ with col1:
     else:
         searched_data = data_after_subject_filter
     
-    # --- [결과] 강사 목록 (*** '선택 유지' 로직 추가 ***) ---
+    # --- [결과] 강사 목록 ( '선택 유지' 로직 추가 ) ---
     instructors_list = sorted(searched_data['강사'].unique())
 
     if not instructors_list:
@@ -401,7 +401,6 @@ with col1:
         selected_instructor = None
         st.session_state.selected_instructor = None # 선택 초기화
     else:
-        # (수정) 세션에 저장된 강사가 현재 목록에 있는지 확인
         default_index = 0
         if st.session_state.selected_instructor in instructors_list:
             default_index = instructors_list.index(st.session_state.selected_instructor)
@@ -418,12 +417,12 @@ with col1:
             f"강사 선택 (결과: {len(instructors_list)}명)", 
             instructors_list,
             format_func=format_instructor_name,
-            index=default_index, # (수정) 세션 값을 기본 인덱스로 설정
-            key='instructor_radio' # (수정) 키 추가
+            index=default_index, 
+            key='instructor_radio'
         )
-        st.session_state.selected_instructor = selected_instructor # (수정) 세션에 현재 선택 저장
+        st.session_state.selected_instructor = selected_instructor # 세션에 현재 선택 저장
 
-# --- 9. 우측 시간표 패널 (*** '요일 헤더 삭제' 및 '과목명 숨기기' 수정됨 ***) ---
+# --- 9. 우측 시간표 패널 ( '요일 헤더 삭제' 및 '과목명 숨기기' 수정됨 ) ---
 with col2:
     if selected_instructor:
         st.header(f"🗓️ {selected_instructor} 강사 시간표 ({selected_year} / {selected_month})")
@@ -434,7 +433,7 @@ with col2:
         time_slots = ['오전', '오후', '저녁']
         
         try:
-            # *** (수정됨) 'format_cell' 함수로 과목명 숨기기 로직 구현 ***
+            # (수정됨) 'format_cell' 함수로 과목명 숨기기 로직 구현
             def format_cell(x):
                 entries = []
                 for _, row in x.iterrows():
@@ -452,14 +451,13 @@ with col2:
             
             timetable_pivot = timetable_agg.pivot(index='시간대', columns='요일', values='수업정보')
             
-            # *** (수정됨) '요일' 상위 헤더 삭제 ***
+            # (수정됨) '요일' 상위 헤더 삭제
             timetable_pivot.columns.name = None
             
             display_df = timetable_pivot.reindex(index=time_slots, columns=days, fill_value="")
             
             display_df = display_df.reset_index().rename(columns={'index': '시간대'})
             
-            # (수정) CSS 클래스 적용 및 인덱스 제거, 헤더(월~일) 표시
             st.markdown(display_df.to_html(escape=False, na_rep="", classes="timetable-grid", index=False, header=True), unsafe_allow_html=True)
         
         except Exception as e:
