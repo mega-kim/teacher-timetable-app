@@ -148,7 +148,8 @@ def convert_df_to_excel(df, index=False):
 
 # *** (수정됨) 엑셀 다운로드 'I열 버그' 및 '\n' 버그, '요일 헤더' 버그 모두 해결 ***
 @st.cache_data
-def generate_area_grid_excel(filtered_data, mapping_data, hardcoded_area_order):
+# *** (수정됨) 'mapping_data' -> 'mapping_df'로 변경 ***
+def generate_area_grid_excel(filtered_data, mapping_df, hardcoded_area_order):
     """영역별로 시트를 나누고, 각 시트에 강사별 그리드를 나열"""
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
@@ -179,7 +180,8 @@ def generate_area_grid_excel(filtered_data, mapping_data, hardcoded_area_order):
             start_row = 0 
             df_area = filtered_data[filtered_data['영역'] == area]
             
-            subjects_in_mapping = list(mapping_data[mapping_data['영역'] == area]['선택과목'].unique())
+            # *** (수정됨) 'mapping_data' -> 'mapping_df'로 변경 ***
+            subjects_in_mapping = list(mapping_df[mapping_df['영역'] == area]['선택과목'].unique())
             subject_order_map = {subject: i for i, subject in enumerate(subjects_in_mapping)}
             
             instructors_by_subject = df_area.groupby('과목')['강사'].unique().to_dict()
@@ -428,6 +430,7 @@ elif password_attempt:
 
 # --- 6. 메인 화면 (데이터 로드) ---
 try:
+    # *** (수정됨) 'mapping_data' -> 'mapping_df'로 변경 ***
     master_data, mapping_df = load_data_from_gs() 
 except Exception as e:
     st.error("데이터 로드에 실패했습니다. 관리자 모드에서 DB 갱신이 필요할 수 있습니다.")
@@ -437,6 +440,7 @@ except Exception as e:
 if master_data.empty:
     st.warning("데이터베이스가 비어있습니다. 관리자 모드에서 데이터를 갱신해주세요.")
     st.stop()
+# *** (수정됨) 'mapping_data' -> 'mapping_df'로 변경 ***
 if mapping_df.empty:
     st.warning("경고: 'subject_mapping' 시트가 비어있습니다. 필터가 작동하지 않을 수 있습니다.")
 
@@ -515,7 +519,8 @@ if selected_view == "전체 출강 현황":
             status_pivot = status_pivot.applymap(format_status).fillna('') 
             
             area_order_map = {area: i for i, area in enumerate(hardcoded_area_order)} 
-            subject_order_map = {subject: i for i, subject in enumerate(mapping_data['선택과목'])}
+            # *** (수정됨) 'mapping_data' -> 'mapping_df'로 변경 ***
+            subject_order_map = {subject: i for i, subject in enumerate(mapping_df['선택과목'])}
             
             pivot_index = status_pivot.index.to_frame(index=False) 
             
@@ -552,7 +557,8 @@ else: # if selected_view == "강사별 시간표":
     with col1:
         
         # --- (수정됨) Row 1: Area/Subject ---
-        available_areas_in_mapping = list(mapping_data['영역'].unique())
+        # *** (수정됨) 'mapping_data' -> 'mapping_df'로 변경 ***
+        available_areas_in_mapping = list(mapping_df['영역'].unique())
         available_areas_in_data = list(master_data['영역'].unique())
         all_available_areas = sorted(list(set(available_areas_in_mapping + available_areas_in_data)))
         area_list = [area for area in hardcoded_area_order if area in all_available_areas]
@@ -579,7 +585,8 @@ else: # if selected_view == "강사별 시간표":
             subject_list = [selected_area] # (수정됨) 텍스트 변경
             disable_subject_filter = True
         else:
-            subjects_in_mapping = list(mapping_data[mapping_data['영역'] == selected_area]['선택과목'].unique())
+            # *** (수정됨) 'mapping_data' -> 'mapping_df'로 변경 ***
+            subjects_in_mapping = list(mapping_df[mapping_df['영역'] == selected_area]['선택과목'].unique())
             subjects_in_data = list(data_after_area_filter[data_after_area_filter['영역'] == selected_area]['과목'].unique())
             ordered_subject_list = [subject for subject in subjects_in_mapping if subject in subjects_in_data]
             other_subjects = sorted([subject for subject in subjects_in_data if subject not in ordered_subject_list])
@@ -692,10 +699,11 @@ else: # if selected_view == "강사별 시간표":
                 st.markdown("현재 선택된 **연/월**의 **모든 강사** 시간표를 다운로드합니다.")
                 
                 @st.cache_data
+                # *** (수정됨) 'mapping_data' -> 'mapping_df'로 변경 ***
                 def get_grid_excel_bytes(filtered_data, mapping_df, hardcoded_area_order):
-                    # (수정) 캐시 무효화를 위해 함수 이름 변경 (v2) -> v3
                     return generate_area_grid_excel(filtered_data, mapping_df, hardcoded_area_order)
 
+                # *** (수정됨) 'mapping_data' -> 'mapping_df'로 변경 ***
                 excel_data_grid = get_grid_excel_bytes(filtered_data, mapping_df, hardcoded_area_order)
                 
                 st.download_button(
