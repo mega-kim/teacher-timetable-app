@@ -6,6 +6,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 from datetime import datetime
 import json 
+import numpy as np # (추가) 엑셀 쓰기 시, nan 값 처리를 위해
 
 # --- 0. Streamlit 앱 기본 설정 ---
 st.set_page_config(layout="wide")
@@ -26,11 +27,14 @@ CUSTOM_CSS = """
     h2 { font-size: 1.75rem; }
     h3 { font-size: 1.25rem; }
     
-    /* (수정됨) 탭 디자인 CSS 삭제 - 기본 라디오 버튼으로 롤백 */
+    /* 탭(Radio) 버튼 기본 스타일 (탭 디자인 아님) */
+    div[role="radiogroup"] {
+        justify-content: center; /* 버튼 그룹 중앙 정렬 */
+    }
     
     /* 시간표 그리드 고정 (가장 중요) */
     table.timetable-grid { /* CSS 클래스 지정 */
-        table-layout: fixed; /* 테이블 레이아웃 고정 */
+        table-layout: fixed; /* 테이블 레이웃 고정 */
         width: 80%; /* 80%로 가로 폭 축소 */
         border-collapse: collapse;
     }
@@ -107,7 +111,6 @@ except Exception as e:
 
 # --- 2. 헬퍼 함수 (데이터 포맷팅) ---
 
-# (수정됨) 화면 표시와 엑셀 다운로드에 공통으로 사용하기 위해 밖으로 이동
 def format_cell_helper(x):
     """(엑셀/화면 공통) 그리드 셀 내용을 만듭니다."""
     entries = []
@@ -116,7 +119,6 @@ def format_cell_helper(x):
         if row['영역'] not in ['국어', '수학', '영어', '한국사']:
             subject_display = f"{row['과목']}<br>"
         
-        # (수정) 엑셀에서는 <br> 대신 \n (줄바꿈) 사용
         if 'is_excel' in x.attrs: 
             subject_display = subject_display.replace("<br>", "\n")
             entries.append(
@@ -144,17 +146,16 @@ def convert_df_to_excel(df, index=False):
     processed_data = output.getvalue()
     return processed_data
 
-# *** (수정됨) 엑셀 다운로드 'TypeError' 해결 ***
+# *** (수정됨) 엑셀 다운로드 'TypeError' 및 '\n' 버그 해결 ***
 @st.cache_data
 def generate_area_grid_excel(filtered_data, mapping_data, hardcoded_area_order):
-    """(신규) 요청사항 2: 영역별로 시트를 나누고, 각 시트에 강사별 그리드를 나열"""
+    """영역별로 시트를 나누고, 각 시트에 강사별 그리드를 나열"""
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         
         time_slots = ['오전', '오후', '저녁']
         days = ['월', '화', '수', '목', '금', '토', '일']
         
-        # 엑셀 스타일 (가운데 정렬, 줄바꿈)
         workbook = writer.book
         cell_format = workbook.add_format({
             'align': 'center', 
@@ -171,12 +172,11 @@ def generate_area_grid_excel(filtered_data, mapping_data, hardcoded_area_order):
         })
         title_format = workbook.add_format({'bold': True, 'font_size': 14})
         
-        # 영역 순서대로 시트 생성
         areas_in_data = list(filtered_data['영역'].unique())
         area_list = [area for area in hardcoded_area_order if area in areas_in_data and area != '[영역 전체]']
 
         for area in area_list:
-            start_row = 0 # 각 시트의 시작 행
+            start_row = 0 
             df_area = filtered_data[filtered_data['영역'] == area]
             
             subjects_in_mapping = list(mapping_data[mapping_data['영역'] == area]['선택과목'].unique())
@@ -195,21 +195,19 @@ def generate_area_grid_excel(filtered_data, mapping_data, hardcoded_area_order):
             if not instructors_in_area:
                 continue 
             
-            worksheet = writer.book.add_worksheet(area) # 새 시트 생성
+            worksheet = writer.book.add_worksheet(area) 
             
             for instructor in instructors_in_area:
-                # 1. 강사명 타이틀 쓰기
                 worksheet.write(start_row, 0, f"🗓️ {instructor} 강사 시간표", title_format)
                 start_row += 1
                 
-                # 2. 강사 데이터로 그리드 생성
                 instructor_data = df_area[df_area['강사'] == instructor]
                 instructor_data.attrs['is_excel'] = True 
                 
                 timetable_agg = instructor_data.groupby(['시간대', '요일']).apply(format_cell_helper).reset_index(name='수업정보')
                 timetable_pivot = timetable_agg.pivot(index='시간대', columns='요일', values='수업정보')
                 timetable_pivot.columns.name = None
-                display_df = timetable_pivot.reindex(index=time_slots, columns=days, fill_value="")
+                display_df = timetable_pivot.reindex(index=time_slots, columns=days, fill_value="") # (수정) nan 대신 공란 ''
                 display_df = display_df.reset_index().rename(columns={'index': '시간대'})
                 
                 # 3. 엑셀에 헤더 쓰기 (to_excel 대신 수동)
@@ -219,23 +217,26 @@ def generate_area_grid_excel(filtered_data, mapping_data, hardcoded_area_order):
                 # 4. 엑셀에 데이터 쓰기 (수동)
                 for r_idx in range(len(display_df)):
                     for c_idx in range(len(display_df.columns)):
-                        # *** (수정됨) str()로 강제 변환하여 TypeError 해결 ***
-                        cell_value = str(display_df.iloc[r_idx, c_idx])
-                        if cell_value == 'nan': cell_value = '' # nan 대신 공란
-                        worksheet.write(start_row + 1 + r_idx, c_idx, cell_value, cell_format)
+                        
+                        # *** (수정됨) TypeError 및 \n 버그 동시 해결 ***
+                        cell_value = display_df.iloc[r_idx, c_idx]
+                        
+                        # 1. None, nan, pd.NA 등을 ''(빈 문자열)로 안전하게 변환
+                        if pd.isna(cell_value):
+                            cell_value = ''
+                        
+                        # 2. write_string을 사용하여 \n을 줄바꿈으로 처리
+                        worksheet.write_string(start_row + 1 + r_idx, c_idx, str(cell_value), cell_format)
                 
-                # 5. 열 너비 설정
                 worksheet.set_column(0, 0, 10) # 시간대
                 worksheet.set_column(1, 7, 20) # 월~일
-                # 6. 행 높이 설정
                 worksheet.set_row(start_row, 25, header_format) # 헤더 행
                 for r_idx in range(len(display_df)):
                     worksheet.set_row(start_row + 1 + r_idx, 80, cell_format) # 데이터 행 (80px)
 
-                # 7. 다음 강사 그리드를 위한 간격
-                start_row += len(display_df) + 3 # 3(데이터) + 1(헤더) + 3(공백)
+                start_row += len(display_df) + 3 
         
-        # writer.close() # (수정) with 문이 자동으로 close하므로 명시적 close 제거
+        # writer.close() # with 문이 자동으로 close
     return output.getvalue()
 
 
@@ -647,7 +648,6 @@ else: # if selected_view == "강사별 시간표":
             time_slots = ['오전', '오후', '저녁']
             
             try:
-                # (수정) 헬퍼 함수에 'is_excel=False' (기본값) 전달
                 instructor_data.attrs['is_excel'] = False 
                 timetable_agg = instructor_data.groupby(['시간대', '요일']).apply(format_cell_helper).reset_index(name='수업정보')
                 
@@ -682,13 +682,9 @@ else: # if selected_view == "강사별 시간표":
                     - **강사 상태**: {"신규 강사" if is_new else "기존 강사"} (최초 개강일: {first_lecture_date.strftime('%Y-%m-%d') if pd.notna(first_lecture_date) else '-'} )
                     """)
                 
-                # *** (수정됨) 다운로드 버튼 로직 변경 ***
                 st.subheader("데이터 다운로드")
-                
-                # 1. '영역별 그리드' 다운로드 버튼
                 st.markdown("현재 선택된 **연/월**의 **모든 강사** 시간표를 다운로드합니다.")
                 
-                # (수정) spinner 위치 변경 (버튼 위에)
                 @st.cache_data
                 def get_grid_excel_bytes(filtered_data, mapping_data, hardcoded_area_order):
                     return generate_area_grid_excel(filtered_data, mapping_data, hardcoded_area_order)
@@ -703,7 +699,6 @@ else: # if selected_view == "강사별 시간표":
                     help="선택한 연/월의 전체 강사 그리드를 영역별 시트로 나누어 다운로드합니다."
                 )
                 
-                # 2. (추가) '목록형' 원본 데이터 다운로드 버튼
                 excel_data_list = convert_df_to_excel(filtered_data.drop(columns=['개강일_dt', '최초 개강일', '선택과목'], errors='ignore'), index=False) 
                 st.download_button(
                     label=f"[{selected_month} 전체 강사 목록] 엑셀 다운로드",
