@@ -309,7 +309,8 @@ if mapping_data.empty:
 # --- 7. (수정됨) 공용 필터 (페이지 상단) ---
 if 'selected_instructor' not in st.session_state:
     st.session_state.selected_instructor = None
-if 'main_tabs' not in st.session_state: # (수정) 탭 상태 초기화
+# (수정) 탭 상태 초기화 (key='main_tabs'가 사용됨)
+if 'main_tabs' not in st.session_state: 
     st.session_state.main_tabs = "전체 출강 현황" # 기본값 설정
 
 all_years = sorted(master_data['연도'].astype(str).unique(), reverse=True)
@@ -348,13 +349,9 @@ st.divider()
 hardcoded_area_order = ['[영역 전체]', '국어', '수학', '영어', '사회탐구', '과학탐구', '논술&제2외국어', '한국사']
 
 # --- 8. (수정됨) 탭(Tab) 생성 ---
-# (수정) 탭 변경 시 세션 상태 업데이트 (on_change 콜백)
-def on_tab_change():
-    st.session_state.main_tabs = st.session_state.main_tabs_key # key로 저장된 값을 세션에 복사
-
+# (수정) 탭 변경 시 on_change 콜백 제거, key만 사용
 tab1, tab2 = st.tabs(["전체 출강 현황", "강사별 시간표"], 
-                     key="main_tabs_key", # 탭 위젯에 key 부여
-                     on_change=on_tab_change) # 탭 변경 시 콜백 실행
+                     key="main_tabs") # key만으로 탭 상태가 세션에 자동 저장/로드됨
 
 # --- 9. (신규) 탭 1: 전체 출강 현황 ---
 with tab1:
