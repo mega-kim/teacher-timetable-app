@@ -309,6 +309,8 @@ if mapping_data.empty:
 # --- 7. (수정됨) 공용 필터 (페이지 상단) ---
 if 'selected_instructor' not in st.session_state:
     st.session_state.selected_instructor = None
+if 'main_tabs' not in st.session_state: # (수정) 탭 상태 초기화
+    st.session_state.main_tabs = "전체 출강 현황" # 기본값 설정
 
 all_years = sorted(master_data['연도'].astype(str).unique(), reverse=True)
 
@@ -346,7 +348,13 @@ st.divider()
 hardcoded_area_order = ['[영역 전체]', '국어', '수학', '영어', '사회탐구', '과학탐구', '논술&제2외국어', '한국사']
 
 # --- 8. (수정됨) 탭(Tab) 생성 ---
-tab1, tab2 = st.tabs(["전체 출강 현황", "강사별 시간표"])
+# (수정) 탭 변경 시 세션 상태 업데이트 (on_change 콜백)
+def on_tab_change():
+    st.session_state.main_tabs = st.session_state.main_tabs_key # key로 저장된 값을 세션에 복사
+
+tab1, tab2 = st.tabs(["전체 출강 현황", "강사별 시간표"], 
+                     key="main_tabs_key", # 탭 위젯에 key 부여
+                     on_change=on_tab_change) # 탭 변경 시 콜백 실행
 
 # --- 9. (신규) 탭 1: 전체 출강 현황 ---
 with tab1:
@@ -366,35 +374,34 @@ with tab1:
                 fill_value=0 
             )
             
+            # (수정) 값 1.0 -> '■'로 변경
             def format_status(val):
                 if val > 0:
-                    return 1 # (요청사항) 1로 표시
-                return None # (요청사항) 공란으로 표시
+                    return "■" # (요청사항) 채워진 사각형
+                return None # 공란으로 표시
             
             status_pivot = status_pivot.applymap(format_status).fillna('') 
             
             area_order_map = {area: i for i, area in enumerate(hardcoded_area_order)} 
             subject_order_map = {subject: i for i, subject in enumerate(mapping_data['선택과목'])}
             
-            # *** (수정됨) 'ambiguous' 오류 해결 ***
-            pivot_index = status_pivot.index.to_frame(index=False) # index=False 추가
+            # (수정됨) 'ambiguous' 오류 해결 (index=False)
+            pivot_index = status_pivot.index.to_frame(index=False) 
             
             pivot_index['area_order'] = pivot_index['영역'].map(area_order_map).fillna(99)
             pivot_index['subject_order'] = pivot_index['과목'].map(subject_order_map).fillna(99)
             
-            # (수정) 정렬된 인덱스를 'status_pivot'에 다시 적용
             sorted_indices = pivot_index.sort_values(
                 by=['area_order', 'subject_order', '강사'],
                 ascending=[True, True, True]
             ).index
             
             status_pivot_sorted = status_pivot.iloc[sorted_indices]
-            # *** (수정 끝) ***
 
             st.info("표가 가로로 긴 경우, 표 내부에서 스크롤할 수 있습니다.")
             st.dataframe(status_pivot_sorted, use_container_width=True)
             
-            status_excel = convert_df_to_excel(status_pivot_sorted, index=True) # 인덱스 포함
+            status_excel = convert_df_to_excel(status_pivot_sorted, index=True)
             st.download_button(
                 label="[출강 현황] 엑셀로 다운로드",
                 data=status_excel,
@@ -562,7 +569,7 @@ with tab2:
                     """)
                 
                 st.subheader("데이터 다운로드")
-                excel_data = convert_df_to_excel(instructor_data.drop(columns=['개강일_dt', '최초 개강일', '선택과목'], errors='ignore'), index=False) # (수정) 불필요한 열 추가 제거
+                excel_data = convert_df_to_excel(instructor_data.drop(columns=['개강일_dt', '최초 개강일', '선택과목'], errors='ignore'), index=False) 
                 st.download_button(
                     label="[선택한 강사의 현재 데이터] 엑셀로 다운로드",
                     data=excel_data,
