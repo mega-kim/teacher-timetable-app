@@ -29,7 +29,7 @@ CUSTOM_CSS = """
     /* 시간표 그리드 고정 (가장 중요) */
     table.timetable-grid { /* CSS 클래스 지정 */
         table-layout: fixed; /* 테이블 레이아웃 고정 */
-        width: 80%; /* (수정됨) 100% -> 80%로 가로 폭 축소 */
+        width: 80%; /* 80%로 가로 폭 축소 */
         border-collapse: collapse;
     }
     table.timetable-grid th { /* 요일 헤더 (월~일) */
@@ -108,7 +108,7 @@ except Exception as e:
 def convert_df_to_excel(df):
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        df.to_excel(writer, index=False, sheet_name='Sheet1')
+        df.to_excel(writer, index=True, sheet_name='Sheet1') # (수정) 인덱스 포함
     processed_data = output.getvalue()
     return processed_data
 
@@ -306,208 +306,269 @@ if master_data.empty:
 if mapping_data.empty:
     st.warning("경고: 'subject_mapping' 시트가 비어있습니다. 필터가 작동하지 않을 수 있습니다.")
 
-# --- 7. (수정됨) 좌우 패널 레이아웃 ---
+# --- 7. (수정됨) 공용 필터 (페이지 상단) ---
 if 'selected_instructor' not in st.session_state:
     st.session_state.selected_instructor = None
 
-# (수정됨) [1, 3] 비율로 변경
-col1, col2 = st.columns([1, 3]) 
+all_years = sorted(master_data['연도'].astype(str).unique(), reverse=True)
 
-# --- 8. (수정됨) 좌측 탐색 패널 (모든 필터 통합) ---
-with col1:
+year_options = list(all_years)
+year_index = 0
+if st.session_state.get('year_select') in year_options:
+    year_index = year_options.index(st.session_state.year_select)
     
-    # --- (수정됨) Row 1: Year/Month ---
-    all_years = sorted(master_data['연도'].astype(str).unique(), reverse=True)
-    # (수정) selected_year가 세션에 없으면 all_years[0]을 사용
-    default_year = st.session_state.get('year_select', all_years[0])
-    if default_year not in all_years:
-        default_year = all_years[0]
+r1_col1, r1_col2, r1_col_spacer = st.columns([1, 1, 4]) # (수정) 2열로 배치
+with r1_col1:
+    selected_year = st.selectbox("연도", year_options, 
+                                 index=year_index, 
+                                 key="year_select")
     
-    r1_col1, r1_col2 = st.columns(2)
-    with r1_col1:
-        selected_year = st.selectbox("연도", all_years, 
-                                     index=all_years.index(default_year), 
-                                     key="year_select")
-    with r1_col2:
-        all_months = sorted(master_data[master_data['연도'].astype(str) == selected_year]['월'].astype(str).unique())
-        # (수정) selected_month가 세션에 없으면 all_months[0]을 사용
-        default_month = st.session_state.get('month_select', all_months[0])
-        if default_month not in all_months:
-            default_month = all_months[0]
-            
-        selected_month = st.selectbox("월", all_months, 
-                                      index=all_months.index(default_month), 
-                                      key="month_select")
+all_months = sorted(master_data[master_data['연도'].astype(str) == selected_year]['월'].astype(str).unique())
 
-    # (수정) filtered_data가 좌측 패널 상단에서 계산됨
-    filtered_data = master_data[
-        (master_data['연도'].astype(str) == selected_year) & 
-        (master_data['월'].astype(str) == selected_month)
-    ]
+month_options = list(all_months)
+month_index = 0
+if st.session_state.get('month_select') in month_options:
+    month_index = month_options.index(st.session_state.month_select)
     
-    st.divider() # 구분선
+with r1_col2:
+    selected_month = st.selectbox("월", month_options, 
+                                  index=month_index, 
+                                  key="month_select")
 
-    # --- (수정됨) Row 2: Area/Subject ---
-    hardcoded_area_order = ['[영역 전체]', '국어', '수학', '영어', '사회탐구', '과학탐구', '논술&제2외국어', '한국사']
-    available_areas_in_mapping = list(mapping_data['영역'].unique())
-    available_areas_in_data = list(master_data['영역'].unique())
-    all_available_areas = sorted(list(set(available_areas_in_mapping + available_areas_in_data)))
-    area_list = [area for area in hardcoded_area_order if area in all_available_areas]
-    other_areas = [area for area in all_available_areas if area not in hardcoded_area_order and area != '[영역 전체]']
-    area_list.extend(other_areas)
+# 공용 필터링된 데이터
+filtered_data = master_data[
+    (master_data['연도'].astype(str) == selected_year) & 
+    (master_data['월'].astype(str) == selected_month)
+]
+st.divider()
+
+# --- 8. (수정됨) 탭(Tab) 생성 ---
+tab1, tab2 = st.tabs(["전체 출강 현황", "강사별 시간표"])
+
+# --- 9. (신규) 탭 1: 전체 출강 현황 ---
+with tab1:
+    st.header(f"📊 {selected_year}년 {selected_month} 전체 출강 현황")
     
-    r2_col1, r2_col2 = st.columns(2)
-    with r2_col1:
-        selected_area = st.selectbox("영역", area_list, key="area_select")
-
-    # [필터 2] 로직
-    if selected_area == '[영역 전체]':
-        data_after_area_filter = filtered_data
+    if filtered_data.empty:
+        st.warning("해당 연/월에 데이터가 없습니다.")
     else:
-        data_after_area_filter = filtered_data[filtered_data['영역'] == selected_area]
-
-    subject_list = []
-    disable_subject_filter = False
-    
-    if selected_area == '[영역 전체]':
-        subject_list = ['[과목 전체]']
-        disable_subject_filter = True
-    elif selected_area in ['국어', '수학', '영어', '한국사']:
-        subject_list = [selected_area] # (수정됨) 텍스트 변경
-        disable_subject_filter = True
-    else:
-        subjects_in_mapping = list(mapping_data[mapping_data['영역'] == selected_area]['선택과목'].unique())
-        subjects_in_data = list(data_after_area_filter[data_after_area_filter['영역'] == selected_area]['과목'].unique())
-        ordered_subject_list = [subject for subject in subjects_in_mapping if subject in subjects_in_data]
-        other_subjects = sorted([subject for subject in subjects_in_data if subject not in ordered_subject_list])
-        
-        if selected_area == '논술&제2외국어':
-             subject_list = ordered_subject_list + other_subjects
-        else: # 사탐, 과탐
-             subject_list = ['전체'] + ordered_subject_list + other_subjects
-    
-    with r2_col2:
-        selected_subject = st.selectbox("선택과목", subject_list, disabled=disable_subject_filter, key="subject_select")
-
-    # 2차: '선택과목'으로 데이터 필터링
-    if selected_area == '[영역 전체]' or disable_subject_filter:
-        data_after_subject_filter = data_after_area_filter
-    elif selected_subject == '전체': 
-        data_after_subject_filter = data_after_area_filter
-    else:
-        data_after_subject_filter = data_after_area_filter[data_after_area_filter['과목'] == selected_subject]
-
-    # --- (수정됨) Row 3: 강사명 검색 ---
-    search_query = st.text_input("강사명 검색 🔍", key="search_query")
-
-    if search_query:
-        searched_data = data_after_subject_filter[
-            data_after_subject_filter['강사'].astype(str).str.contains(search_query, case=False)
-        ]
-    else:
-        searched_data = data_after_subject_filter
-    
-    st.divider() # 구분선
-
-    # --- (수정됨) Row 4: 강사 목록 (스크롤) ---
-    instructors_list = sorted(searched_data['강사'].unique())
-
-    if not instructors_list:
-        st.warning("검색 결과가 없습니다.")
-        selected_instructor = None
-        st.session_state.selected_instructor = None # 선택 초기화
-    else:
-        default_index = 0
-        if st.session_state.selected_instructor in instructors_list:
-            default_index = instructors_list.index(st.session_state.selected_instructor)
-        
-        month_start_date = pd.to_datetime(f'{selected_year}-{selected_month.replace("월","")}-01', format='%Y-%m-%d', errors='coerce')
-        def format_instructor_name(instructor_name):
-            first_lecture_date = master_data.loc[master_data['강사'] == instructor_name, '최초 개강일'].min()
-            if pd.notna(first_lecture_date) and pd.notna(month_start_date):
-                if first_lecture_date >= month_start_date:
-                    return f"{instructor_name} (신규)"
-            return f"{instructor_name} (기존)"
-        
-        # (수정됨) st.container(height=400) 추가
-        st.markdown(f"**강사 선택** (결과: {len(instructors_list)}명)")
-        with st.container(height=400):
-            selected_instructor = st.radio(
-                f"강사 선택 (결과: {len(instructors_list)}명)", 
-                instructors_list,
-                format_func=format_instructor_name,
-                index=default_index, 
-                key='instructor_radio',
-                label_visibility="collapsed" # 라벨 숨기기
-            )
-        st.session_state.selected_instructor = selected_instructor # 세션에 현재 선택 저장
-
-# --- 9. 우측 시간표 패널 ( '요일 헤더 삭제' 및 '과목명 숨기기' 수정됨 ) ---
-with col2:
-    if selected_instructor:
-        st.header(f"🗓️ {selected_instructor} 강사 시간표 ({selected_year} / {selected_month})")
-
-        instructor_data = filtered_data[filtered_data['강사'] == selected_instructor]
-
-        days = ['월', '화', '수', '목', '금', '토', '일']
-        time_slots = ['오전', '오후', '저녁']
-        
         try:
-            # (수정됨) 'format_cell' 함수로 과목명 숨기기 로직 구현
-            def format_cell(x):
-                entries = []
-                for _, row in x.iterrows():
-                    subject_display = "" # Default: empty
-                    # (수정) '영역'이 국/수/영이 아닌 경우에만 과목명 표시
-                    if row['영역'] not in ['국어', '수학', '영어', '한국사']:
-                        subject_display = f"{row['과목']}<br>"
-                    
-                    entries.append(
-                        f"<b>{row['학원']}</b><br>{subject_display}({row['강좌구분']})"
-                    )
-                return "<br><br>".join(entries)
+            # '학원' 컬럼이 비어있는 경우(nan)를 대비
+            filtered_data['학원'] = filtered_data['학원'].fillna('학원미정')
+            
+            # (수정) '영역'도 인덱스에 추가 (CSV 예시 파일처럼)
+            status_pivot = filtered_data.pivot_table(
+                index=['영역', '과목', '강사'],
+                columns='학원',
+                values='요일', # 아무 컬럼이나 사용
+                aggfunc='count',
+                fill_value=0 # 공란 대신 0
+            )
+            
+            # (수정) 값 1로 변경, 0은 공란으로
+            def format_status(val):
+                if val > 0:
+                    return 1 # (요청사항) 1로 표시
+                return None # (요청사항) 공란으로 표시
+            
+            status_pivot = status_pivot.applymap(format_status)
+            
+            # (수정) 정렬: 영역(하드코딩) -> 과목(맵핑순) -> 강사(가나다)
+            # 1. 맵핑 시트에서 '영역' 순서 정의
+            area_order_map = {area: i for i, area in enumerate(hardcoded_area_order)}
+            # 2. 맵핑 시트에서 '선택과목' 순서 정의
+            subject_order_map = {subject: i for i, subject in enumerate(mapping_data['선택과목'])}
+            
+            # 피벗 테이블의 인덱스(영역, 과목, 강사)를 가져와서 정렬
+            pivot_index = status_pivot.index.to_frame()
+            pivot_index['area_order'] = pivot_index['영역'].map(area_order_map).fillna(99)
+            pivot_index['subject_order'] = pivot_index['과목'].map(subject_order_map).fillna(99)
+            
+            status_pivot = status_pivot.iloc[pivot_index.sort_values(
+                by=['area_order', 'subject_order', '강사'],
+                ascending=[True, True, True]
+            ).index]
 
-            timetable_agg = instructor_data.groupby(['시간대', '요일']).apply(format_cell).reset_index(name='수업정보')
+            st.info("표가 가로로 긴 경우, 표 내부에서 스크롤할 수 있습니다.")
+            st.dataframe(status_pivot, use_container_width=True)
             
-            timetable_pivot = timetable_agg.pivot(index='시간대', columns='요일', values='수업정보')
-            
-            # (수정됨) '요일' 상위 헤더 삭제
-            timetable_pivot.columns.name = None
-            
-            display_df = timetable_pivot.reindex(index=time_slots, columns=days, fill_value="")
-            
-            display_df = display_df.reset_index().rename(columns={'index': '시간대'})
-            
-            st.markdown(display_df.to_html(escape=False, na_rep="", classes="timetable-grid", index=False, header=True), unsafe_allow_html=True)
-        
-        except Exception as e:
-            st.error(f"시간표를 그리는 중 오류 발생: {e}")
-            st.dataframe(instructor_data)
-
-        st.subheader("강사 정보")
-        if not instructor_data.empty:
-            instructor_info_full = master_data[master_data['강사'] == selected_instructor]
-            if not instructor_info_full.empty:
-                instructor_info = instructor_info_full.iloc[0]
-                
-                first_lecture_date = instructor_info['최초 개강일']
-                is_new = False
-                if pd.notna(first_lecture_date) and pd.notna(month_start_date):
-                    if first_lecture_date >= month_start_date:
-                        is_new = True
-                
-                st.markdown(f"""
-                - **자택 주소**: {instructor_info['자택 주소']}
-                - **강사 상태**: {"신규 강사" if is_new else "기존 강사"} (최초 개강일: {first_lecture_date.strftime('%Y-%m-%d') if pd.notna(first_lecture_date) else '-'} )
-                """)
-            
-            st.subheader("데이터 다운로드")
-            excel_data = convert_df_to_excel(instructor_data)
+            # (추가) 엑셀 다운로드
+            status_excel = convert_df_to_excel(status_pivot) # 인덱스 포함
             st.download_button(
-                label="[선택한 강사의 현재 데이터] 엑셀로 다운로드",
-                data=excel_data,
-                file_name=f"{selected_year}_{selected_month}_{selected_instructor}_시간표.xlsx",
+                label="[출강 현황] 엑셀로 다운로드",
+                data=status_excel,
+                file_name=f"{selected_year}_{selected_month}_전체출강현황.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
+            
+        except Exception as e:
+            st.error(f"출강 현황표 생성 중 오류 발생: {e}")
+            st.dataframe(filtered_data) 
+
+# --- 10. (수정됨) 탭 2: 강사별 시간표 ---
+with tab2:
+    # (수정됨) [1, 3] 비율로 변경 (시간표 영역 확대)
+    col1, col2 = st.columns([1, 3]) 
+
+    # --- 10-1. 좌측 탐색 패널 ---
+    with col1:
+        
+        # --- (수정됨) Row 1: Area/Subject ---
+        hardcoded_area_order = ['[영역 전체]', '국어', '수학', '영어', '사회탐구', '과학탐구', '논술&제2외국어', '한국사']
+        available_areas_in_mapping = list(mapping_data['영역'].unique())
+        available_areas_in_data = list(master_data['영역'].unique())
+        all_available_areas = sorted(list(set(available_areas_in_mapping + available_areas_in_data)))
+        area_list = [area for area in hardcoded_area_order if area in all_available_areas]
+        other_areas = [area for area in all_available_areas if area not in hardcoded_area_order and area != '[영역 전체]']
+        area_list.extend(other_areas)
+        
+        r2_col1, r2_col2 = st.columns(2)
+        with r2_col1:
+            selected_area = st.selectbox("영역", area_list, key="area_select")
+
+        # [필터 2] 로직
+        if selected_area == '[영역 전체]':
+            data_after_area_filter = filtered_data
         else:
-            st.info("선택된 강사에 대한 표시할 정보가 없습니다.")
+            data_after_area_filter = filtered_data[filtered_data['영역'] == selected_area]
+
+        subject_list = []
+        disable_subject_filter = False
+        
+        if selected_area == '[영역 전체]':
+            subject_list = ['[과목 전체]']
+            disable_subject_filter = True
+        elif selected_area in ['국어', '수학', '영어', '한국사']:
+            subject_list = [selected_area] # (수정됨) 텍스트 변경
+            disable_subject_filter = True
+        else:
+            subjects_in_mapping = list(mapping_data[mapping_data['영역'] == selected_area]['선택과목'].unique())
+            subjects_in_data = list(data_after_area_filter[data_after_area_filter['영역'] == selected_area]['과목'].unique())
+            ordered_subject_list = [subject for subject in subjects_in_mapping if subject in subjects_in_data]
+            other_subjects = sorted([subject for subject in subjects_in_data if subject not in ordered_subject_list])
+            
+            if selected_area == '논술&제2외국어':
+                 subject_list = ordered_subject_list + other_subjects
+            else: # 사탐, 과탐
+                 subject_list = ['전체'] + ordered_subject_list + other_subjects
+        
+        with r2_col2:
+            selected_subject = st.selectbox("선택과목", subject_list, disabled=disable_subject_filter, key="subject_select")
+
+        if selected_area == '[영역 전체]' or disable_subject_filter:
+            data_after_subject_filter = data_after_area_filter
+        elif selected_subject == '전체': 
+            data_after_subject_filter = data_after_area_filter
+        else:
+            data_after_subject_filter = data_after_area_filter[data_after_area_filter['과목'] == selected_subject]
+
+        # --- (수정됨) Row 2: 강사명 검색 ---
+        search_query = st.text_input("강사명 검색 🔍", key="search_query")
+
+        if search_query:
+            searched_data = data_after_subject_filter[
+                data_after_subject_filter['강사'].astype(str).str.contains(search_query, case=False)
+            ]
+        else:
+            searched_data = data_after_subject_filter
+        
+        st.divider() # 구분선
+
+        # --- (수정됨) Row 3: 강사 목록 (스크롤) ---
+        instructors_list = sorted(searched_data['강사'].unique())
+
+        if not instructors_list:
+            st.warning("검색 결과가 없습니다.")
+            selected_instructor = None
+            st.session_state.selected_instructor = None 
+        else:
+            default_index = 0
+            if st.session_state.selected_instructor in instructors_list:
+                default_index = instructors_list.index(st.session_state.selected_instructor)
+            
+            month_start_date = pd.to_datetime(f'{selected_year}-{selected_month.replace("월","")}-01', format='%Y-%m-%d', errors='coerce')
+            def format_instructor_name(instructor_name):
+                first_lecture_date = master_data.loc[master_data['강사'] == instructor_name, '최초 개강일'].min()
+                if pd.notna(first_lecture_date) and pd.notna(month_start_date):
+                    if first_lecture_date >= month_start_date:
+                        return f"{instructor_name} (신규)"
+                return f"{instructor_name} (기존)"
+            
+            st.markdown(f"**강사 선택** (결과: {len(instructors_list)}명)")
+            with st.container(height=400):
+                selected_instructor = st.radio(
+                    "강사 선택", 
+                    instructors_list,
+                    format_func=format_instructor_name,
+                    index=default_index, 
+                    key='instructor_radio',
+                    label_visibility="collapsed"
+                )
+            st.session_state.selected_instructor = selected_instructor 
+
+    # --- 10-2. 우측 시간표 패널 ---
+    with col2:
+        if selected_instructor:
+            st.header(f"🗓️ {selected_instructor} 강사 시간표 ({selected_year} / {selected_month})")
+
+            instructor_data = filtered_data[filtered_data['강사'] == selected_instructor]
+
+            days = ['월', '화', '수', '목', '금', '토', '일']
+            time_slots = ['오전', '오후', '저녁']
+            
+            try:
+                def format_cell(x):
+                    entries = []
+                    for _, row in x.iterrows():
+                        subject_display = "" 
+                        if row['영역'] not in ['국어', '수학', '영어', '한국사']:
+                            subject_display = f"{row['과목']}<br>"
+                        
+                        entries.append(
+                            f"<b>{row['학원']}</b><br>{subject_display}({row['강좌구분']})"
+                        )
+                    return "<br><br>".join(entries)
+
+                timetable_agg = instructor_data.groupby(['시간대', '요일']).apply(format_cell).reset_index(name='수업정보')
+                
+                timetable_pivot = timetable_agg.pivot(index='시간대', columns='요일', values='수업정보')
+                
+                timetable_pivot.columns.name = None
+                
+                display_df = timetable_pivot.reindex(index=time_slots, columns=days, fill_value="")
+                
+                display_df = display_df.reset_index().rename(columns={'index': '시간대'})
+                
+                st.markdown(display_df.to_html(escape=False, na_rep="", classes="timetable-grid", index=False, header=True), unsafe_allow_html=True)
+            
+            except Exception as e:
+                st.error(f"시간표를 그리는 중 오류 발생: {e}")
+                st.dataframe(instructor_data)
+
+            st.subheader("강사 정보")
+            if not instructor_data.empty:
+                instructor_info_full = master_data[master_data['강사'] == selected_instructor]
+                if not instructor_info_full.empty:
+                    instructor_info = instructor_info_full.iloc[0]
+                    
+                    first_lecture_date = instructor_info['최초 개강일']
+                    is_new = False
+                    if pd.notna(first_lecture_date) and pd.notna(month_start_date):
+                        if first_lecture_date >= month_start_date:
+                            is_new = True
+                    
+                    st.markdown(f"""
+                    - **자택 주소**: {instructor_info['자택 주소']}
+                    - **강사 상태**: {"신규 강사" if is_new else "기존 강사"} (최초 개강일: {first_lecture_date.strftime('%Y-%m-%d') if pd.notna(first_lecture_date) else '-'} )
+                    """)
+                
+                st.subheader("데이터 다운로드")
+                excel_data = convert_df_to_excel(instructor_data.drop(columns=['개강일_dt', '최초 개강일'], errors='ignore')) # (수정) 불필요한 열 제외
+                st.download_button(
+                    label="[선택한 강사의 현재 데이터] 엑셀로 다운로드",
+                    data=excel_data,
+                    file_name=f"{selected_year}_{selected_month}_{selected_instructor}_시간표.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+            else:
+                st.info("선택된 강사에 대한 표시할 정보가 없습니다.")
