@@ -28,7 +28,7 @@ CUSTOM_CSS = """
     
     /* 시간표 그리드 고정 (가장 중요) */
     table.timetable-grid { /* CSS 클래스 지정 */
-        table-layout: fixed; /* 테이블 레이웃 고정 */
+        table-layout: fixed; /* 테이블 레이아웃 고정 */
         width: 80%; /* 80%로 가로 폭 축소 */
         border-collapse: collapse;
     }
@@ -366,32 +366,35 @@ with tab1:
                 fill_value=0 
             )
             
-            # (수정) 값 1로 변경, 0은 공란으로
             def format_status(val):
                 if val > 0:
                     return 1 # (요청사항) 1로 표시
                 return None # (요청사항) 공란으로 표시
             
-            status_pivot = status_pivot.applymap(format_status).fillna('') # None -> ''(공란)
+            status_pivot = status_pivot.applymap(format_status).fillna('') 
             
-            # (수정) 정렬: 영역(하드코딩) -> 과목(맵핑순) -> 강사(가나다)
             area_order_map = {area: i for i, area in enumerate(hardcoded_area_order)} 
             subject_order_map = {subject: i for i, subject in enumerate(mapping_data['선택과목'])}
             
-            pivot_index = status_pivot.index.to_frame()
+            # *** (수정됨) 'ambiguous' 오류 해결 ***
+            pivot_index = status_pivot.index.to_frame(index=False) # index=False 추가
+            
             pivot_index['area_order'] = pivot_index['영역'].map(area_order_map).fillna(99)
             pivot_index['subject_order'] = pivot_index['과목'].map(subject_order_map).fillna(99)
             
-            status_pivot_sorted = status_pivot.iloc[pivot_index.sort_values(
+            # (수정) 정렬된 인덱스를 'status_pivot'에 다시 적용
+            sorted_indices = pivot_index.sort_values(
                 by=['area_order', 'subject_order', '강사'],
                 ascending=[True, True, True]
-            ).index]
+            ).index
+            
+            status_pivot_sorted = status_pivot.iloc[sorted_indices]
+            # *** (수정 끝) ***
 
             st.info("표가 가로로 긴 경우, 표 내부에서 스크롤할 수 있습니다.")
             st.dataframe(status_pivot_sorted, use_container_width=True)
             
-            # (추가) 엑셀 다운로드 (정렬된 데이터로)
-            status_excel = convert_df_to_excel(status_pivot_sorted, index=True) # (수정) 인덱스 포함
+            status_excel = convert_df_to_excel(status_pivot_sorted, index=True) # 인덱스 포함
             st.download_button(
                 label="[출강 현황] 엑셀로 다운로드",
                 data=status_excel,
@@ -559,7 +562,7 @@ with tab2:
                     """)
                 
                 st.subheader("데이터 다운로드")
-                excel_data = convert_df_to_excel(instructor_data.drop(columns=['개강일_dt', '최초 개강일'], errors='ignore'), index=False)
+                excel_data = convert_df_to_excel(instructor_data.drop(columns=['개강일_dt', '최초 개강일', '선택과목'], errors='ignore'), index=False) # (수정) 불필요한 열 추가 제거
                 st.download_button(
                     label="[선택한 강사의 현재 데이터] 엑셀로 다운로드",
                     data=excel_data,
