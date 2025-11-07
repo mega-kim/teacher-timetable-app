@@ -146,7 +146,7 @@ def convert_df_to_excel(df, index=False):
     processed_data = output.getvalue()
     return processed_data
 
-# *** (수정됨) 엑셀 다운로드 'I열 버그' 및 '\n' 버그 해결 ***
+# *** (수정됨) 엑셀 다운로드 'I열 버그', '\n' 버그, '요일 헤더' 버그 모두 해결 ***
 @st.cache_data
 def generate_area_grid_excel(filtered_data, mapping_data, hardcoded_area_order):
     """영역별로 시트를 나누고, 각 시트에 강사별 그리드를 나열"""
@@ -206,8 +206,11 @@ def generate_area_grid_excel(filtered_data, mapping_data, hardcoded_area_order):
                 
                 timetable_agg = instructor_data.groupby(['시간대', '요일']).apply(format_cell_helper).reset_index(name='수업정보')
                 timetable_pivot = timetable_agg.pivot(index='시간대', columns='요일', values='수업정보')
+                
+                # *** (수정됨) '요일' 상위 헤더 삭제 ***
                 timetable_pivot.columns.name = None
-                display_df = timetable_pivot.reindex(index=time_slots, columns=days, fill_value="") # (수정) nan 대신 공란 ''
+                
+                display_df = timetable_pivot.reindex(index=time_slots, columns=days, fill_value="") 
                 display_df = display_df.reset_index().rename(columns={'index': '시간대'})
                 
                 # 3. 엑셀에 헤더 쓰기 (to_excel 대신 수동)
@@ -222,10 +225,12 @@ def generate_area_grid_excel(filtered_data, mapping_data, hardcoded_area_order):
                         cell_value = display_df.iloc[r_idx, c_idx]
                         
                         # 1. None, nan, pd.NA 등을 ''(빈 문자열)로 안전하게 변환
-                        if pd.isna(cell_value):
+                        if pd.isna(cell_value) or cell_value == "":
                             cell_value = ''
+                        else:
+                            cell_value = str(cell_value) # \n이 포함된 문자열로 유지
                         
-                        # 2. write_string을 사용하여 \n을 줄바꿈으로 처리
+                        # 2. write_string을 사용하여 \n을 줄바꿈으로 처리 (TypeError 방지)
                         worksheet.write_string(start_row + 1 + r_idx, c_idx, cell_value, cell_format)
                 
                 worksheet.set_column(0, 0, 10) # 시간대
@@ -294,7 +299,7 @@ def load_data_from_gs():
     else:
         master_df['최초 개강일'] = pd.NaT
 
-    return master_df, mapping_df 
+    return master_df, mapping_data 
 
 # --- 4. 신규 강좌 파일 가공 함수 (기존 로직) ---
 def process_new_lecture_file(file):
