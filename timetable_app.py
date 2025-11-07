@@ -28,7 +28,7 @@ CUSTOM_CSS = """
     
     /* 시간표 그리드 고정 (가장 중요) */
     table.timetable-grid { /* CSS 클래스 지정 */
-        table-layout: fixed; /* 테이블 레이아웃 고정 */
+        table-layout: fixed; /* 테이블 레이웃 고정 */
         width: 80%; /* 80%로 가로 폭 축소 */
         border-collapse: collapse;
     }
@@ -105,10 +105,10 @@ except Exception as e:
 
 # --- 2. 엑셀 다운로드 함수 ---
 @st.cache_data
-def convert_df_to_excel(df):
+def convert_df_to_excel(df, index=False): # (수정) 인덱스 포함 여부 파라미터 추가
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        df.to_excel(writer, index=True, sheet_name='Sheet1') # (수정) 인덱스 포함
+        df.to_excel(writer, index=index, sheet_name='Sheet1') 
     processed_data = output.getvalue()
     return processed_data
 
@@ -317,7 +317,7 @@ year_index = 0
 if st.session_state.get('year_select') in year_options:
     year_index = year_options.index(st.session_state.year_select)
     
-r1_col1, r1_col2, r1_col_spacer = st.columns([1, 1, 4]) # (수정) 2열로 배치
+r1_col1, r1_col2, r1_col_spacer = st.columns([1, 1, 4]) 
 with r1_col1:
     selected_year = st.selectbox("연도", year_options, 
                                  index=year_index, 
@@ -342,6 +342,9 @@ filtered_data = master_data[
 ]
 st.divider()
 
+# *** (수정됨) hardcoded_area_order를 탭 바깥으로 이동 ***
+hardcoded_area_order = ['[영역 전체]', '국어', '수학', '영어', '사회탐구', '과학탐구', '논술&제2외국어', '한국사']
+
 # --- 8. (수정됨) 탭(Tab) 생성 ---
 tab1, tab2 = st.tabs(["전체 출강 현황", "강사별 시간표"])
 
@@ -353,16 +356,14 @@ with tab1:
         st.warning("해당 연/월에 데이터가 없습니다.")
     else:
         try:
-            # '학원' 컬럼이 비어있는 경우(nan)를 대비
             filtered_data['학원'] = filtered_data['학원'].fillna('학원미정')
             
-            # (수정) '영역'도 인덱스에 추가 (CSV 예시 파일처럼)
             status_pivot = filtered_data.pivot_table(
                 index=['영역', '과목', '강사'],
                 columns='학원',
-                values='요일', # 아무 컬럼이나 사용
+                values='요일', 
                 aggfunc='count',
-                fill_value=0 # 공란 대신 0
+                fill_value=0 
             )
             
             # (수정) 값 1로 변경, 0은 공란으로
@@ -371,29 +372,26 @@ with tab1:
                     return 1 # (요청사항) 1로 표시
                 return None # (요청사항) 공란으로 표시
             
-            status_pivot = status_pivot.applymap(format_status)
+            status_pivot = status_pivot.applymap(format_status).fillna('') # None -> ''(공란)
             
             # (수정) 정렬: 영역(하드코딩) -> 과목(맵핑순) -> 강사(가나다)
-            # 1. 맵핑 시트에서 '영역' 순서 정의
-            area_order_map = {area: i for i, area in enumerate(hardcoded_area_order)}
-            # 2. 맵핑 시트에서 '선택과목' 순서 정의
+            area_order_map = {area: i for i, area in enumerate(hardcoded_area_order)} 
             subject_order_map = {subject: i for i, subject in enumerate(mapping_data['선택과목'])}
             
-            # 피벗 테이블의 인덱스(영역, 과목, 강사)를 가져와서 정렬
             pivot_index = status_pivot.index.to_frame()
             pivot_index['area_order'] = pivot_index['영역'].map(area_order_map).fillna(99)
             pivot_index['subject_order'] = pivot_index['과목'].map(subject_order_map).fillna(99)
             
-            status_pivot = status_pivot.iloc[pivot_index.sort_values(
+            status_pivot_sorted = status_pivot.iloc[pivot_index.sort_values(
                 by=['area_order', 'subject_order', '강사'],
                 ascending=[True, True, True]
             ).index]
 
             st.info("표가 가로로 긴 경우, 표 내부에서 스크롤할 수 있습니다.")
-            st.dataframe(status_pivot, use_container_width=True)
+            st.dataframe(status_pivot_sorted, use_container_width=True)
             
-            # (추가) 엑셀 다운로드
-            status_excel = convert_df_to_excel(status_pivot) # 인덱스 포함
+            # (추가) 엑셀 다운로드 (정렬된 데이터로)
+            status_excel = convert_df_to_excel(status_pivot_sorted, index=True) # (수정) 인덱스 포함
             st.download_button(
                 label="[출강 현황] 엑셀로 다운로드",
                 data=status_excel,
@@ -407,14 +405,12 @@ with tab1:
 
 # --- 10. (수정됨) 탭 2: 강사별 시간표 ---
 with tab2:
-    # (수정됨) [1, 3] 비율로 변경 (시간표 영역 확대)
     col1, col2 = st.columns([1, 3]) 
 
     # --- 10-1. 좌측 탐색 패널 ---
     with col1:
         
         # --- (수정됨) Row 1: Area/Subject ---
-        hardcoded_area_order = ['[영역 전체]', '국어', '수학', '영어', '사회탐구', '과학탐구', '논술&제2외국어', '한국사']
         available_areas_in_mapping = list(mapping_data['영역'].unique())
         available_areas_in_data = list(master_data['영역'].unique())
         all_available_areas = sorted(list(set(available_areas_in_mapping + available_areas_in_data)))
@@ -563,7 +559,7 @@ with tab2:
                     """)
                 
                 st.subheader("데이터 다운로드")
-                excel_data = convert_df_to_excel(instructor_data.drop(columns=['개강일_dt', '최초 개강일'], errors='ignore')) # (수정) 불필요한 열 제외
+                excel_data = convert_df_to_excel(instructor_data.drop(columns=['개강일_dt', '최초 개강일'], errors='ignore'), index=False)
                 st.download_button(
                     label="[선택한 강사의 현재 데이터] 엑셀로 다운로드",
                     data=excel_data,
