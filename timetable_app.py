@@ -26,6 +26,11 @@ CUSTOM_CSS = """
     h2 { font-size: 1.75rem; }
     h3 { font-size: 1.25rem; }
     
+    /* (수정) 탭(Radio) 버튼 가운데 정렬 */
+    div[role="radiogroup"] {
+        justify-content: center;
+    }
+    
     /* 시간표 그리드 고정 (가장 중요) */
     table.timetable-grid { /* CSS 클래스 지정 */
         table-layout: fixed; /* 테이블 레이아웃 고정 */
@@ -309,9 +314,8 @@ if mapping_data.empty:
 # --- 7. (수정됨) 공용 필터 (페이지 상단) ---
 if 'selected_instructor' not in st.session_state:
     st.session_state.selected_instructor = None
-# (수정) 탭 상태 초기화 (key='main_tabs'가 사용됨)
-if 'main_tabs' not in st.session_state: 
-    st.session_state.main_tabs = "전체 출강 현황" # 기본값 설정
+if 'main_view' not in st.session_state: # (수정) 탭 -> 뷰 상태 초기화
+    st.session_state.main_view = "전체 출강 현황" # 기본값 설정
 
 all_years = sorted(master_data['연도'].astype(str).unique(), reverse=True)
 
@@ -348,13 +352,18 @@ st.divider()
 # *** (수정됨) hardcoded_area_order를 탭 바깥으로 이동 ***
 hardcoded_area_order = ['[영역 전체]', '국어', '수학', '영어', '사회탐구', '과학탐구', '논술&제2외국어', '한국사']
 
-# --- 8. (수정됨) 탭(Tab) 생성 ---
-# (수정) 탭 변경 시 on_change 콜백 제거, key만 사용
-tab1, tab2 = st.tabs(["전체 출강 현황", "강사별 시간표"], 
-                     key="main_tabs") # key만으로 탭 상태가 세션에 자동 저장/로드됨
+# --- 8. (수정됨) 탭(Tab) -> 라디오(Radio) 버튼으로 변경 ---
+selected_view = st.radio(
+    "보기 선택:",
+    ["전체 출강 현황", "강사별 시간표"],
+    horizontal=True,
+    key="main_view", # 세션에 저장하여 탭 전환 버그 해결
+    label_visibility="collapsed" # "보기 선택:" 라벨 숨기기
+)
+st.divider()
 
-# --- 9. (신규) 탭 1: 전체 출강 현황 ---
-with tab1:
+# --- 9. (수정됨) '전체 출강 현황' 뷰 ---
+if selected_view == "전체 출강 현황":
     st.header(f"📊 {selected_year}년 {selected_month} 전체 출강 현황")
     
     if filtered_data.empty:
@@ -410,8 +419,8 @@ with tab1:
             st.error(f"출강 현황표 생성 중 오류 발생: {e}")
             st.dataframe(filtered_data) 
 
-# --- 10. (수정됨) 탭 2: 강사별 시간표 ---
-with tab2:
+# --- 10. (수정됨) '강사별 시간표' 뷰 ---
+else: # if selected_view == "강사별 시간표":
     col1, col2 = st.columns([1, 3]) 
 
     # --- 10-1. 좌측 탐색 패널 ---
