@@ -10,7 +10,7 @@ import json
 # --- 0. Streamlit 앱 기본 설정 ---
 st.set_page_config(layout="wide")
 
-# --- CSS 스타일 주입 (폰트, 그리드 고정) ---
+# --- CSS 스타일 주입 (라디오 버튼 -> 탭 디자인) ---
 CUSTOM_CSS = """
 <style>
     /* 전체 기본 폰트 크기 줄이기 (기본 16px -> 14px) */
@@ -26,9 +26,31 @@ CUSTOM_CSS = """
     h2 { font-size: 1.75rem; }
     h3 { font-size: 1.25rem; }
     
-    /* (수정) 탭(Radio) 버튼 가운데 정렬 */
+    /* (신규) 탭(Radio) 버튼 디자인 */
     div[role="radiogroup"] {
-        justify-content: center;
+        justify-content: center; /* 버튼 그룹 중앙 정렬 */
+    }
+    /* 라디오 버튼의 '동그라미' 숨기기 */
+    div[role="radiogroup"] label input {
+        display: none;
+    }
+    /* 탭(라디오) 버튼 기본 스타일 */
+    div[role="radiogroup"] label {
+        display: inline-block;
+        padding: 8px 20px; /* 버튼 크기 */
+        background-color: #f0f2f6; /* 비활성 탭 배경색 */
+        border: 1px solid #ddd;
+        border-radius: 5px 5px 0 0; /* 탭 모양 (위쪽만 둥글게) */
+        margin-bottom: -1px; /* 아래쪽 테두리 겹침 */
+        cursor: pointer;
+        transition: all 0.2s ease;
+    }
+    /* 선택된 탭(라디오) 버튼 스타일 */
+    div[role="radiogroup"] label:has(input:checked) {
+        background-color: #ffffff; /* 활성 탭 배경색 (흰색) */
+        border-bottom: 1px solid #ffffff; /* 아래쪽 테두리 숨김 */
+        font-weight: bold;
+        color: #007bff; /* 활성 탭 글자색 */
     }
     
     /* 시간표 그리드 고정 (가장 중요) */
@@ -108,14 +130,146 @@ except Exception as e:
     st.error(f"오류: {e}")
     st.stop()
 
-# --- 2. 엑셀 다운로드 함수 ---
+# --- 2. 헬퍼 함수 (데이터 포맷팅) ---
+
+# (수정됨) 화면 표시와 엑셀 다운로드에 공통으로 사용하기 위해 밖으로 이동
+def format_cell_helper(x):
+    """(엑셀/화면 공통) 그리드 셀 내용을 만듭니다."""
+    entries = []
+    for _, row in x.iterrows():
+        subject_display = "" 
+        # (수정) '영역'이 국/수/영/한이 아닌 경우에만 과목명 표시
+        if row['영역'] not in ['국어', '수학', '영어', '한국사']:
+            subject_display = f"{row['과목']}<br>"
+        
+        # (수정) 엑셀에서는 <br> 대신 \n (줄바꿈) 사용
+        if 'is_excel' in x.attrs: 
+            subject_display = subject_display.replace("<br>", "\n")
+            entries.append(
+                f"{row['학원']}\n{subject_display}({row['강좌구분']})"
+            )
+        else: # 화면용 (HTML)
+            entries.append(
+                f"<b>{row['학원']}</b><br>{subject_display}({row['강좌구분']})"
+            )
+    
+    if 'is_excel' in x.attrs:
+        return "\n\n".join(entries) # 엑셀에서는 2줄 띄기
+    else:
+        return "<br><br>".join(entries) # 화면에서는 <br>
+
+
+# --- 3. 엑셀 다운로드 함수 ---
+
 @st.cache_data
-def convert_df_to_excel(df, index=False): # (수정) 인덱스 포함 여부 파라미터 추가
+def convert_df_to_excel(df, index=False): 
+    """(단순 다운로드) 단일 DataFrame을 엑셀로 변환"""
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         df.to_excel(writer, index=index, sheet_name='Sheet1') 
     processed_data = output.getvalue()
     return processed_data
+
+@st.cache_data
+def generate_area_grid_excel(filtered_data, mapping_data, hardcoded_area_order):
+    """(신규) 요청사항 2: 영역별로 시트를 나누고, 각 시트에 강사별 그리드를 나열"""
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        
+        time_slots = ['오전', '오후', '저녁']
+        days = ['월', '화', '수', '목', '금', '토', '일']
+        
+        # 엑셀 스타일 (가운데 정렬, 줄바꿈)
+        workbook = writer.book
+        cell_format = workbook.add_format({
+            'align': 'center', 
+            'valign': 'vcenter', 
+            'text_wrap': True,
+            'border': 1
+        })
+        header_format = workbook.add_format({
+            'bold': True, 
+            'align': 'center', 
+            'valign': 'vcenter', 
+            'fg_color': '#f0f2f6', 
+            'border': 1
+        })
+        title_format = workbook.add_format({'bold': True, 'font_size': 14})
+        
+        # 영역 순서대로 시트 생성
+        areas_in_data = list(filtered_data['영역'].unique())
+        area_list = [area for area in hardcoded_area_order if area in areas_in_data and area != '[영역 전체]']
+
+        for area in area_list:
+            start_row = 0 # 각 시트의 시작 행
+            df_area = filtered_data[filtered_data['영역'] == area]
+            
+            # 강사 목록 (맵핑 시트 순서 + 가나다순)
+            subjects_in_mapping = list(mapping_data[mapping_data['영역'] == area]['선택과목'].unique())
+            subject_order_map = {subject: i for i, subject in enumerate(subjects_in_mapping)}
+            
+            # 과목별 강사 목록 생성
+            instructors_by_subject = df_area.groupby('과목')['강사'].unique().to_dict()
+            
+            # 과목 순서 정렬 (맵핑 시트 기준)
+            all_subjects_in_area = sorted(df_area['과목'].unique(), key=lambda s: (subject_order_map.get(s, 99), s))
+            
+            # 강사 목록 (중복 제거, 순서 유지)
+            instructors_in_area = []
+            for subject in all_subjects_in_area:
+                for instructor in sorted(instructors_by_subject.get(subject, [])):
+                    if instructor not in instructors_in_area:
+                        instructors_in_area.append(instructor)
+
+            if not instructors_in_area:
+                continue # 이 영역에 강사가 없으면 시트 생성 안함
+            
+            worksheet = writer.book.add_worksheet(area) # 새 시트 생성
+            
+            for instructor in instructors_in_area:
+                # 1. 강사명 타이틀 쓰기
+                worksheet.write(start_row, 0, f"🗓️ {instructor} 강사 시간표", title_format)
+                start_row += 1
+                
+                # 2. 강사 데이터로 그리드 생성
+                instructor_data = df_area[df_area['강사'] == instructor]
+                instructor_data.attrs['is_excel'] = True # 헬퍼 함수에 엑셀 모드 전달
+                
+                timetable_agg = instructor_data.groupby(['시간대', '요일']).apply(format_cell_helper).reset_index(name='수업정보')
+                timetable_pivot = timetable_agg.pivot(index='시간대', columns='요일', values='수업정보')
+                timetable_pivot.columns.name = None
+                display_df = timetable_pivot.reindex(index=time_slots, columns=days, fill_value="")
+                display_df = display_df.reset_index().rename(columns={'index': '시간대'})
+                
+                # 3. 엑셀에 그리드 쓰기 (to_excel 사용)
+                display_df.to_excel(writer, sheet_name=area, startrow=start_row, index=False, header=True)
+                
+                # 4. (중요) 엑셀 스타일 적용
+                # 데이터 범위: (start_row + 1) ~ (start_row + 1 + len(display_df))
+                # 헤더
+                for c_idx, col_name in enumerate(display_df.columns):
+                    worksheet.write(start_row, c_idx, col_name, header_format)
+                # 데이터 셀
+                for r_idx in range(len(display_df)):
+                    for c_idx in range(len(display_df.columns)):
+                        worksheet.write(start_row + 1 + r_idx, c_idx, display_df.iloc[r_idx, c_idx], cell_format)
+                
+                # 5. 열 너비 설정
+                worksheet.set_column(0, 0, 10) # 시간대
+                worksheet.set_column(1, 7, 20) # 월~일
+                # 6. 행 높이 설정
+                worksheet.set_row(start_row, 25, header_format) # 헤더 행
+                for r_idx in range(len(display_df)):
+                    worksheet.set_row(start_row + 1 + r_idx, 80, cell_format) # 데이터 행 (80px)
+
+                # 7. 다음 강사 그리드를 위한 간격
+                start_row += len(display_df) + 3 # (그리드 3행 + 헤더 1행 + 타이틀 1행 + 공백 2행 = 7 -> 아님)
+                                                  # (그리드 3행 + 헤더 1행 = 4) + 타이틀 1행 + 공백 2행 = 7
+                                                  # (len(display_df) = 3) + 1 (타이틀) + 1 (헤더) + 2 (공백) = 7
+
+        writer.close()
+    return output.getvalue()
+
 
 # --- 3. Google Sheet 데이터 로드 함수 ( '중복 제거' 로직 ) ---
 @st.cache_data(ttl=60) # 60초마다 캐시 갱신
@@ -518,7 +672,7 @@ else: # if selected_view == "강사별 시간표":
                 )
             st.session_state.selected_instructor = selected_instructor 
 
-    # --- 10-2. 우측 시간표 패널 ---
+    # --- 10-2. 우측 시간표 패널 (*** '영역별 그리드 다운로드' 수정됨 ***) ---
     with col2:
         if selected_instructor:
             st.header(f"🗓️ {selected_instructor} 강사 시간표 ({selected_year} / {selected_month})")
@@ -529,19 +683,9 @@ else: # if selected_view == "강사별 시간표":
             time_slots = ['오전', '오후', '저녁']
             
             try:
-                def format_cell(x):
-                    entries = []
-                    for _, row in x.iterrows():
-                        subject_display = "" 
-                        if row['영역'] not in ['국어', '수학', '영어', '한국사']:
-                            subject_display = f"{row['과목']}<br>"
-                        
-                        entries.append(
-                            f"<b>{row['학원']}</b><br>{subject_display}({row['강좌구분']})"
-                        )
-                    return "<br><br>".join(entries)
-
-                timetable_agg = instructor_data.groupby(['시간대', '요일']).apply(format_cell).reset_index(name='수업정보')
+                # (수정) 헬퍼 함수에 'is_excel=False' (기본값) 전달
+                instructor_data.attrs['is_excel'] = False 
+                timetable_agg = instructor_data.groupby(['시간대', '요일']).apply(format_cell_helper).reset_index(name='수업정보')
                 
                 timetable_pivot = timetable_agg.pivot(index='시간대', columns='요일', values='수업정보')
                 
@@ -574,12 +718,26 @@ else: # if selected_view == "강사별 시간표":
                     - **강사 상태**: {"신규 강사" if is_new else "기존 강사"} (최초 개강일: {first_lecture_date.strftime('%Y-%m-%d') if pd.notna(first_lecture_date) else '-'} )
                     """)
                 
+                # *** (수정됨) 다운로드 버튼 로직 변경 ***
                 st.subheader("데이터 다운로드")
-                excel_data = convert_df_to_excel(instructor_data.drop(columns=['개강일_dt', '최초 개강일', '선택과목'], errors='ignore'), index=False) 
+                
+                # 1. '영역별 그리드' 다운로드 버튼
+                with st.spinner('영역별 통합 그리드 생성 중... (시간이 걸릴 수 있습니다)'):
+                    excel_data_grid = generate_area_grid_excel(filtered_data, mapping_data, hardcoded_area_order)
+                
                 st.download_button(
-                    label="[선택한 강사의 현재 데이터] 엑셀로 다운로드",
-                    data=excel_data,
-                    file_name=f"{selected_year}_{selected_month}_{selected_instructor}_시간표.xlsx",
+                    label=f"[{selected_month} 영역별 통합 그리드] 엑셀 다운로드",
+                    data=excel_data_grid,
+                    file_name=f"{selected_year}_{selected_month}_영역별_통합그리드.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+                
+                # 2. (추가) '목록형' 원본 데이터 다운로드 버튼
+                excel_data_list = convert_df_to_excel(filtered_data.drop(columns=['개강일_dt', '최초 개강일', '선택과목'], errors='ignore'), index=False) 
+                st.download_button(
+                    label=f"[{selected_month} 전체 강사 목록] 엑셀 다운로드",
+                    data=excel_data_list,
+                    file_name=f"{selected_year}_{selected_month}_전체강사목록.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
             else:
