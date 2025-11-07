@@ -146,7 +146,7 @@ def convert_df_to_excel(df, index=False):
     processed_data = output.getvalue()
     return processed_data
 
-# *** (수정됨) 엑셀 다운로드 'TypeError' 및 '\n' 버그 해결 ***
+# *** (수정됨) 엑셀 다운로드 'I열 버그' 및 '\n' 버그 해결 ***
 @st.cache_data
 def generate_area_grid_excel(filtered_data, mapping_data, hardcoded_area_order):
     """영역별로 시트를 나누고, 각 시트에 강사별 그리드를 나열"""
@@ -226,15 +226,16 @@ def generate_area_grid_excel(filtered_data, mapping_data, hardcoded_area_order):
                             cell_value = ''
                         
                         # 2. write_string을 사용하여 \n을 줄바꿈으로 처리
-                        worksheet.write_string(start_row + 1 + r_idx, c_idx, str(cell_value), cell_format)
+                        worksheet.write_string(start_row + 1 + r_idx, c_idx, cell_value, cell_format)
                 
                 worksheet.set_column(0, 0, 10) # 시간대
                 worksheet.set_column(1, 7, 20) # 월~일
                 worksheet.set_row(start_row, 25, header_format) # 헤더 행
                 for r_idx in range(len(display_df)):
-                    worksheet.set_row(start_row + 1 + r_idx, 80, cell_format) # 데이터 행 (80px)
+                    # *** (수정됨) I열 버그 해결: cell_format 제거 ***
+                    worksheet.set_row(start_row + 1 + r_idx, 80) # 데이터 행 (80px)
 
-                start_row += len(display_df) + 3 
+                start_row += len(display_df) + 3 # 3(데이터) + 1(헤더) + 3(공백)
         
         # writer.close() # with 문이 자동으로 close
     return output.getvalue()
@@ -687,6 +688,7 @@ else: # if selected_view == "강사별 시간표":
                 
                 @st.cache_data
                 def get_grid_excel_bytes(filtered_data, mapping_data, hardcoded_area_order):
+                    # (수정) 캐시 무효화를 위해 함수 이름 변경 (v2)
                     return generate_area_grid_excel(filtered_data, mapping_data, hardcoded_area_order)
 
                 excel_data_grid = get_grid_excel_bytes(filtered_data, mapping_data, hardcoded_area_order)
