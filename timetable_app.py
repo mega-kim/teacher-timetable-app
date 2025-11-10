@@ -109,7 +109,7 @@ except Exception as e:
     st.error(f"오류: {e}")
     st.stop()
 
-# --- 2. 헬퍼 함수 (데이터 포맷팅) (*** \n -> <br> 수정됨 ***) ---
+# --- 2. 헬퍼 함수 (데이터 포맷팅) ---
 
 def format_cell_helper(x):
     """(엑셀/화면 공통) 그리드 셀 내용을 만듭니다."""
@@ -158,7 +158,7 @@ def convert_df_to_excel(df, index=False):
     processed_data = output.getvalue()
     return processed_data
 
-# (수정됨) 엑셀 다운로드 'I열 버그' 및 '\n' 버그, '요일 헤더' 버그 모두 해결
+# *** (수정됨) 엑셀 다운로드 'I열 버그' 및 '\n' 버그, '요일 헤더' 버그 모두 해결 ***
 @st.cache_data
 def generate_area_grid_excel(filtered_data, mapping_df, hardcoded_area_order):
     """영역별로 시트를 나누고, 각 시트에 강사별 그리드를 나열"""
@@ -219,7 +219,7 @@ def generate_area_grid_excel(filtered_data, mapping_df, hardcoded_area_order):
                 timetable_agg = instructor_data.groupby(['시간대', '요일']).apply(format_cell_helper).reset_index(name='수업정보')
                 timetable_pivot = timetable_agg.pivot(index='시간대', columns='요일', values='수업정보')
                 
-                # (수정) '요일' 상위 헤더 삭제
+                # *** (수정 1/3) '요일' 상위 헤더 삭제 ***
                 timetable_pivot.columns.name = None
                 
                 display_df = timetable_pivot.reindex(index=time_slots, columns=days, fill_value="") 
@@ -233,21 +233,23 @@ def generate_area_grid_excel(filtered_data, mapping_df, hardcoded_area_order):
                 for r_idx in range(len(display_df)):
                     for c_idx in range(len(display_df.columns)):
                         
-                        # (수정) TypeError 및 \n 버그 동시 해결
+                        # *** (수정 2/3) TypeError 및 \n 버그 동시 해결 ***
                         cell_value = display_df.iloc[r_idx, c_idx]
                         
+                        # 1. None, nan, pd.NA 등을 ''(빈 문자열)로 안전하게 변환
                         if pd.isna(cell_value) or cell_value == "":
                             cell_value = ''
                         else:
-                            cell_value = str(cell_value) 
+                            cell_value = str(cell_value) # \n이 포함된 문자열로 유지
                         
+                        # 2. write_string을 사용하여 \n을 줄바꿈으로 처리 (TypeError 방지)
                         worksheet.write_string(start_row + 1 + r_idx, c_idx, cell_value, cell_format)
                 
                 worksheet.set_column(0, 0, 10) # 시간대
                 worksheet.set_column(1, 7, 20) # 월~일
                 worksheet.set_row(start_row, 25, header_format) # 헤더 행
                 for r_idx in range(len(display_df)):
-                    # (수정) I열 버그 해결: cell_format 제거
+                    # *** (수정 3/3) I열 버그 해결: cell_format 제거 ***
                     worksheet.set_row(start_row + 1 + r_idx, 80) # 데이터 행 (80px)
 
                 start_row += len(display_df) + 3 # 3(데이터) + 1(헤더) + 3(공백)
@@ -294,6 +296,8 @@ def load_data_from_gs():
             master_df['영역'] = '기타'
             master_df['선택과목'] = master_df['과목'] 
         else:
+            # (수정) DB에 저장된 '글자 \n'을 '실제 \n'로 변환
+            master_df['학원'] = master_df['학원'].astype(str).str.replace(r'\\n', '\n', regex=True)
             master_df = pd.merge(master_df, mapping_df[['선택과목', '영역']], left_on='과목', right_on='선택과목', how='left')
             master_df['영역'] = master_df['영역'].fillna('한국사') # '기타' -> '한국사'로
     else:
@@ -311,7 +315,7 @@ def load_data_from_gs():
 
     return master_df, mapping_df 
 
-# --- 4. 신규 강좌 파일 가공 함수 (기존 로직) ---
+# --- 4. 신규 강좌 파일 가공 함수 (*** '글자 \n' 저장 방지 ***) ---
 def process_new_lecture_file(file):
     df_list = []
     try:
@@ -346,7 +350,7 @@ def process_new_lecture_file(file):
     df['월'] = df['월'].replace('0월', pd.NA)
     df['학원'] = df['학원'].astype(str).str.replace('러셀', '').str.replace('CORE', '').str.strip()
     
-    # (수정) process_new_lecture_file에서 원본 학원명의 \n을 \n (실제 줄바꿈)으로 변경
+    # (수정) 원본 엑셀의 '글자 \n'를 '실제 \n'로 미리 변환
     df['학원'] = df['학원'].astype(str).str.replace(r'\\n', '\n', regex=True)
     
     df_exploded = df.assign(수업시간_분리=df['수업시간'].astype(str).str.split('\n')).explode('수업시간_분리')
@@ -593,7 +597,7 @@ else: # if selected_view == "강사별 시간표":
             subject_list = [selected_area] # (수정됨) 텍스트 변경
             disable_subject_filter = True
         else:
-            subjects_in_mapping = list(mapping_df[mapping_data['영역'] == selected_area]['선택과목'].unique())
+            subjects_in_mapping = list(mapping_df[mapping_df['영역'] == selected_area]['선택과목'].unique())
             subjects_in_data = list(data_after_area_filter[data_after_area_filter['영역'] == selected_area]['과목'].unique())
             ordered_subject_list = [subject for subject in subjects_in_mapping if subject in subjects_in_data]
             other_subjects = sorted([subject for subject in subjects_in_data if subject not in ordered_subject_list])
