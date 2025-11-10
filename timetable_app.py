@@ -116,9 +116,9 @@ def format_cell_helper(x):
     entries = []
     for _, row in x.iterrows():
         # 원본 데이터 가져오기
-        academy = str(row['학원']) # (수정) 문자열로 변환
-        subject = str(row['과목']) # (수정) 문자열로 변환
-        course_type = str(row['강좌구분']) # (수정) 문자열로 변환
+        academy = str(row['학원']) 
+        subject = str(row['과목']) 
+        course_type = str(row['강좌구분']) 
 
         subject_display = "" 
         if row['영역'] not in ['국어', '수학', '영어', '한국사']:
@@ -127,18 +127,18 @@ def format_cell_helper(x):
         if 'is_excel' in x.attrs: 
             # --- 엑셀 로직 ---
             subject_display_excel = subject_display.replace("<br>", "\n")
-            # (유지) 엑셀은 \n을 올바르게 처리하므로 academy 변환 불필요
             entries.append(
                 f"{academy}\n{subject_display_excel}({course_type})"
             )
         else: 
             # --- 화면(HTML) 로직 ---
-            # *** (수정됨) 화면(HTML)에서 \n을 <br>로 치환 ***
-            subject_display_html = subject_display.replace('\n', '<br>')
-            academy_html = academy.replace('\n', '<br>')
+            # *** (수정됨) 화면(HTML)에서 \n과 \\n을 모두 <br>로 치환 ***
+            subject_display_html = subject_display.replace('\\n', '<br>').replace('\n', '<br>')
+            academy_html = academy.replace('\\n', '<br>').replace('\n', '<br>')
+            course_type_html = course_type.replace('\\n', '<br>').replace('\n', '<br>')
             
             entries.append(
-                f"<b>{academy_html}</b><br>{subject_display_html}({course_type})"
+                f"<b>{academy_html}</b><br>{subject_display_html}({course_type_html})"
             )
     
     if 'is_excel' in x.attrs:
@@ -160,7 +160,6 @@ def convert_df_to_excel(df, index=False):
 
 # *** (수정됨) 엑셀 다운로드 'I열 버그' 및 '\n' 버그, '요일 헤더' 버그 모두 해결 ***
 @st.cache_data
-# *** (수정됨) 'mapping_data' -> 'mapping_df'로 변경 ***
 def generate_area_grid_excel_v2(filtered_data, mapping_df, hardcoded_area_order): # (수정) 캐시 무효화 (v2)
     """영역별로 시트를 나누고, 각 시트에 강사별 그리드를 나열"""
     output = io.BytesIO()
@@ -192,7 +191,6 @@ def generate_area_grid_excel_v2(filtered_data, mapping_df, hardcoded_area_order)
             start_row = 0 
             df_area = filtered_data[filtered_data['영역'] == area]
             
-            # *** (수정됨) 'mapping_data' -> 'mapping_df'로 변경 ***
             subjects_in_mapping = list(mapping_df[mapping_df['영역'] == area]['선택과목'].unique())
             subject_order_map = {subject: i for i, subject in enumerate(subjects_in_mapping)}
             
@@ -721,7 +719,8 @@ else: # if selected_view == "강사별 시간표":
                 @st.cache_data
                 # *** (수정됨) 'mapping_data' -> 'mapping_df'로 변경 ***
                 def get_grid_excel_bytes_v2(filtered_data, mapping_df, hardcoded_area_order): # (수정) 캐시 무효화 (v2)
-                    return generate_area_grid_excel(filtered_data, mapping_df, hardcoded_area_order)
+                    # *** (수정됨) 'NameError' 해결 ***
+                    return generate_area_grid_excel_v2(filtered_data, mapping_df, hardcoded_area_order)
 
                 # *** (수정됨) 'mapping_data' -> 'mapping_df'로 변경 ***
                 excel_data_grid = get_grid_excel_bytes_v2(filtered_data, mapping_df, hardcoded_area_order)
