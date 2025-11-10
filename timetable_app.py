@@ -109,7 +109,7 @@ except Exception as e:
     st.error(f"오류: {e}")
     st.stop()
 
-# --- 2. 헬퍼 함수 (데이터 포맷팅) ---
+# --- 2. 헬퍼 함수 (데이터 포맷팅) (*** \n -> <br> 수정됨 ***) ---
 
 def format_cell_helper(x):
     """(엑셀/화면 공통) 그리드 셀 내용을 만듭니다."""
@@ -160,6 +160,7 @@ def convert_df_to_excel(df, index=False):
 
 # *** (수정됨) 엑셀 다운로드 'I열 버그' 및 '\n' 버그, '요일 헤더' 버그 모두 해결 ***
 @st.cache_data
+# *** (수정됨) 'mapping_data' -> 'mapping_df'로 변경 ***
 def generate_area_grid_excel(filtered_data, mapping_df, hardcoded_area_order):
     """영역별로 시트를 나누고, 각 시트에 강사별 그리드를 나열"""
     output = io.BytesIO()
@@ -191,6 +192,7 @@ def generate_area_grid_excel(filtered_data, mapping_df, hardcoded_area_order):
             start_row = 0 
             df_area = filtered_data[filtered_data['영역'] == area]
             
+            # *** (수정됨) 'mapping_data' -> 'mapping_df'로 변경 ***
             subjects_in_mapping = list(mapping_df[mapping_df['영역'] == area]['선택과목'].unique())
             subject_order_map = {subject: i for i, subject in enumerate(subjects_in_mapping)}
             
@@ -271,6 +273,10 @@ def load_data_from_gs():
         key_columns = ['연도', '월', '강사', '과목', '요일', '시간대', '학원', '강좌구분']
         existing_key_columns = [col for col in key_columns if col in master_df.columns]
         master_df = master_df.drop_duplicates(subset=existing_key_columns, keep='first')
+        
+        # *** (수정) DB에 저장된 '글자 \n'을 '실제 \n'로 변환 ***
+        if '학원' in master_df.columns:
+            master_df['학원'] = master_df['학원'].astype(str).str.replace(r'\\n', '\n', regex=True)
     
     # '자택 주소' 병합 로직
     if not master_df.empty:
@@ -296,8 +302,6 @@ def load_data_from_gs():
             master_df['영역'] = '기타'
             master_df['선택과목'] = master_df['과목'] 
         else:
-            # (수정) DB에 저장된 '글자 \n'을 '실제 \n'로 변환
-            master_df['학원'] = master_df['학원'].astype(str).str.replace(r'\\n', '\n', regex=True)
             master_df = pd.merge(master_df, mapping_df[['선택과목', '영역']], left_on='과목', right_on='선택과목', how='left')
             master_df['영역'] = master_df['영역'].fillna('한국사') # '기타' -> '한국사'로
     else:
@@ -350,7 +354,7 @@ def process_new_lecture_file(file):
     df['월'] = df['월'].replace('0월', pd.NA)
     df['학원'] = df['학원'].astype(str).str.replace('러셀', '').str.replace('CORE', '').str.strip()
     
-    # (수정) 원본 엑셀의 '글자 \n'를 '실제 \n'로 미리 변환
+    # *** (수정) 원본 엑셀의 '글자 \n'를 '실제 \n'로 미리 변환 ***
     df['학원'] = df['학원'].astype(str).str.replace(r'\\n', '\n', regex=True)
     
     df_exploded = df.assign(수업시간_분리=df['수업시간'].astype(str).str.split('\n')).explode('수업시간_분리')
@@ -446,6 +450,7 @@ elif password_attempt:
 
 # --- 6. 메인 화면 (데이터 로드) ---
 try:
+    # *** (수정됨) 'mapping_data' -> 'mapping_df'로 변경 ***
     master_data, mapping_df = load_data_from_gs() 
 except Exception as e:
     st.error("데이터 로드에 실패했습니다. 관리자 모드에서 DB 갱신이 필요할 수 있습니다.")
@@ -455,6 +460,7 @@ except Exception as e:
 if master_data.empty:
     st.warning("데이터베이스가 비어있습니다. 관리자 모드에서 데이터를 갱신해주세요.")
     st.stop()
+# *** (수정됨) 'mapping_data' -> 'mapping_df'로 변경 ***
 if mapping_df.empty:
     st.warning("경고: 'subject_mapping' 시트가 비어있습니다. 필터가 작동하지 않을 수 있습니다.")
 
@@ -533,6 +539,7 @@ if selected_view == "전체 출강 현황":
             status_pivot = status_pivot.applymap(format_status).fillna('') 
             
             area_order_map = {area: i for i, area in enumerate(hardcoded_area_order)} 
+            # *** (수정됨) 'mapping_data' -> 'mapping_df'로 변경 ***
             subject_order_map = {subject: i for i, subject in enumerate(mapping_df['선택과목'])}
             
             pivot_index = status_pivot.index.to_frame(index=False) 
@@ -570,6 +577,7 @@ else: # if selected_view == "강사별 시간표":
     with col1:
         
         # --- (수정됨) Row 1: Area/Subject ---
+        # *** (수정됨) 'mapping_data' -> 'mapping_df'로 변경 ***
         available_areas_in_mapping = list(mapping_df['영역'].unique())
         available_areas_in_data = list(master_data['영역'].unique())
         all_available_areas = sorted(list(set(available_areas_in_mapping + available_areas_in_data)))
@@ -597,6 +605,7 @@ else: # if selected_view == "강사별 시간표":
             subject_list = [selected_area] # (수정됨) 텍스트 변경
             disable_subject_filter = True
         else:
+            # *** (수정됨) 'mapping_data' -> 'mapping_df'로 변경 ***
             subjects_in_mapping = list(mapping_df[mapping_df['영역'] == selected_area]['선택과목'].unique())
             subjects_in_data = list(data_after_area_filter[data_after_area_filter['영역'] == selected_area]['과목'].unique())
             ordered_subject_list = [subject for subject in subjects_in_mapping if subject in subjects_in_data]
@@ -710,10 +719,12 @@ else: # if selected_view == "강사별 시간표":
                 st.markdown("현재 선택된 **연/월**의 **모든 강사** 시간표를 다운로드합니다.")
                 
                 @st.cache_data
+                # *** (수정됨) 'mapping_data' -> 'mapping_df'로 변경 ***
                 def get_grid_excel_bytes(filtered_data, mapping_df, hardcoded_area_order):
-                    # (수정) 캐시 무효화를 위해 함수 이름 변경 (v3)
+                    # (수정) 캐시 무효화를 위해 함수 이름 변경 (v3) -> v4
                     return generate_area_grid_excel(filtered_data, mapping_df, hardcoded_area_order)
 
+                # *** (수정됨) 'mapping_data' -> 'mapping_df'로 변경 ***
                 excel_data_grid = get_grid_excel_bytes(filtered_data, mapping_df, hardcoded_area_order)
                 
                 st.download_button(
