@@ -133,8 +133,8 @@ def format_cell_helper(x):
             )
         else: 
             # --- 화면(HTML) 로직 ---
-            subject_display_html = subject_display # 이미 <br>이거나 공란
             # *** (수정됨) 화면(HTML)에서 \n을 <br>로 치환 ***
+            subject_display_html = subject_display.replace('\n', '<br>')
             academy_html = academy.replace('\n', '<br>')
             
             entries.append(
@@ -161,7 +161,7 @@ def convert_df_to_excel(df, index=False):
 # *** (수정됨) 엑셀 다운로드 'I열 버그' 및 '\n' 버그, '요일 헤더' 버그 모두 해결 ***
 @st.cache_data
 # *** (수정됨) 'mapping_data' -> 'mapping_df'로 변경 ***
-def generate_area_grid_excel(filtered_data, mapping_df, hardcoded_area_order):
+def generate_area_grid_excel_v2(filtered_data, mapping_df, hardcoded_area_order): # (수정) 캐시 무효화 (v2)
     """영역별로 시트를 나누고, 각 시트에 강사별 그리드를 나열"""
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
@@ -260,7 +260,7 @@ def generate_area_grid_excel(filtered_data, mapping_df, hardcoded_area_order):
     return output.getvalue()
 
 
-# --- 3. Google Sheet 데이터 로드 함수 ( '중복 제거' 로직 ) ---
+# --- 3. Google Sheet 데이터 로드 함수 (*** '\n' 버그 수정됨 ***) ---
 @st.cache_data(ttl=60) # 60초마다 캐시 갱신
 def load_data_from_gs():
     """Google Sheet에서 3개의 탭을 모두 읽어 DataFrame으로 반환"""
@@ -319,7 +319,7 @@ def load_data_from_gs():
 
     return master_df, mapping_df 
 
-# --- 4. 신규 강좌 파일 가공 함수 (*** '글자 \n' 저장 방지 ***) ---
+# --- 4. 신규 강좌 파일 가공 함수 (*** '\n' 버그 수정됨 ***) ---
 def process_new_lecture_file(file):
     df_list = []
     try:
@@ -448,7 +448,7 @@ if password_attempt == admin_password:
 elif password_attempt:
     st.sidebar.error("비밀번호가 틀렸습니다.")
 
-# --- 6. 메인 화면 (데이터 로드) ---
+# --- 6. 메인 화면 (데이터 로드) (*** 'NameError' 수정됨 ***) ---
 try:
     # *** (수정됨) 'mapping_data' -> 'mapping_df'로 변경 ***
     master_data, mapping_df = load_data_from_gs() 
@@ -720,12 +720,11 @@ else: # if selected_view == "강사별 시간표":
                 
                 @st.cache_data
                 # *** (수정됨) 'mapping_data' -> 'mapping_df'로 변경 ***
-                def get_grid_excel_bytes(filtered_data, mapping_df, hardcoded_area_order):
-                    # (수정) 캐시 무효화를 위해 함수 이름 변경 (v3) -> v4
+                def get_grid_excel_bytes_v2(filtered_data, mapping_df, hardcoded_area_order): # (수정) 캐시 무효화 (v2)
                     return generate_area_grid_excel(filtered_data, mapping_df, hardcoded_area_order)
 
                 # *** (수정됨) 'mapping_data' -> 'mapping_df'로 변경 ***
-                excel_data_grid = get_grid_excel_bytes(filtered_data, mapping_df, hardcoded_area_order)
+                excel_data_grid = get_grid_excel_bytes_v2(filtered_data, mapping_df, hardcoded_area_order)
                 
                 st.download_button(
                     label=f"[{selected_month} 영역별 통합 그리드] 엑셀 다운로드",
