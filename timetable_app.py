@@ -9,7 +9,7 @@ import re  # 정규식 모듈
 st.set_page_config(layout="wide", page_title="강사별 통합 시간표")
 
 # 버전 확인용 (업데이트 반영 여부 확인)
-st.caption("🚀 [System] 버전: 4.0 (스크롤바 복구 + NaN 제거 완료)")
+st.caption("🚀 [System] 버전: 5.0 (NaN 제거 강화 + 드롭박스 위치 수정 + 엑셀 정렬 수정)")
 
 # --- CSS 스타일 주입 ---
 CUSTOM_CSS = """
@@ -125,7 +125,8 @@ def format_cell_helper(x):
         if 'is_excel' in x.attrs and x.attrs['is_excel']:
             content = f"{academy}\n"
             if subj_disp: content += f"{subj_disp}\n"
-            content += f"({course_type})"
+            # [수정] 강좌구분이 있을 때만 괄호 추가
+            if course_type: content += f"({course_type})"
             entries.append(content)
             
         # [웹 화면용]
@@ -135,7 +136,9 @@ def format_cell_helper(x):
             course_type_html = course_type.replace('\n', '<br>')
             
             subj_str = f"{subject_html}<br>" if subject_html else ""
-            entries.append(f"<b>{academy_html}</b><br>{subj_str}<span style='font-size:0.9em; color:gray'>({course_type_html})</span>")
+            # [수정] 강좌구분이 있을 때만 괄호 추가
+            course_str = f"<span style='font-size:0.9em; color:gray'>({course_type_html})</span>" if course_type_html else ""
+            entries.append(f"<b>{academy_html}</b><br>{subj_str}{course_str}")
     
     join_char = "\n\n" if ('is_excel' in x.attrs and x.attrs['is_excel']) else "<br><br>"
     return join_char.join(entries)
@@ -307,9 +310,11 @@ if 'selected_instructor' not in st.session_state: st.session_state.selected_inst
 if 'main_view' not in st.session_state: st.session_state.main_view = "전체 출강 현황"
 
 ys = sorted(m_df['연도'].astype(str).unique(), reverse=True)
-y_sel = st.columns([1,1,4])[0].selectbox("연도", ys, index=0, key="y_sel")
+# [수정] 컬럼 한 번만 선언하여 나란히 배치
+cols = st.columns([1,1,4])
+y_sel = cols[0].selectbox("연도", ys, index=0, key="y_sel")
 ms = sorted(m_df[m_df['연도'].astype(str)==y_sel]['월'].astype(str).unique())
-m_sel = st.columns([1,1,4])[1].selectbox("월", ms, index=0, key="m_sel")
+m_sel = cols[1].selectbox("월", ms, index=0, key="m_sel")
 data = m_df[(m_df['연도'].astype(str)==y_sel) & (m_df['월'].astype(str)==m_sel)]
 st.divider()
 
@@ -327,8 +332,11 @@ if view == "전체 출강 현황":
         a_map = {a:i for i,a in enumerate(hard_areas)}; s_map = {s:i for i,s in enumerate(map_df['선택과목'])}
         idx = piv.index.to_frame(index=False)
         idx['a'] = idx['영역'].map(a_map).fillna(99); idx['s'] = idx['과목'].map(s_map).fillna(99)
-        st.dataframe(piv.iloc[idx.sort_values(['a','s','강사']).index], use_container_width=True)
-        st.download_button("엑셀 다운로드", convert_df_to_excel(piv, True), f"전체현황.xlsx")
+        # [수정] 정렬된 데이터프레임을 변수에 저장
+        sorted_piv = piv.iloc[idx.sort_values(['a','s','강사']).index]
+        st.dataframe(sorted_piv, use_container_width=True)
+        # [수정] 엑셀 다운로드 시 정렬된 데이터프레임 사용
+        st.download_button("엑셀 다운로드", convert_df_to_excel(sorted_piv, True), f"전체현황.xlsx")
 else:
     lc, rc = st.columns([1,3])
     with lc:
@@ -344,7 +352,7 @@ else:
         insts = sorted(d_fin['강사'].unique())
         
         if insts:
-            # [수정] 스크롤바 복구
+            # 스크롤바 영역 유지
             st.markdown(f"**강사 선택** ({len(insts)}명)")
             with st.container(height=400):
                 st.session_state.selected_instructor = st.radio("강사", insts, label_visibility="collapsed")
