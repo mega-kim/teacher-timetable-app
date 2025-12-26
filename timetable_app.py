@@ -9,7 +9,7 @@ import re
 st.set_page_config(layout="wide", page_title="강사별 통합 시간표")
 
 # 버전 확인용
-st.caption("🚀 [System] 버전: 6.0 (로직 완전 분리 + 유령컬럼 제거 + 드롭박스 정렬)")
+st.caption("🚀 [System] 버전: 7.0 (NaN 완전 박멸 + 빈 시간대 처리 완벽 수정)")
 
 # --- CSS 스타일 ---
 CUSTOM_CSS = """
@@ -83,7 +83,7 @@ try:
 except Exception as e:
     st.error(f"연결 오류: {e}"); st.stop()
 
-# --- 2. 텍스트 정제 함수 (공통) ---
+# --- 2. 텍스트 정제 함수 ---
 def clean_text(text):
     """NaN, None 제거 및 기본 문자열 변환"""
     if pd.isna(text) or text is None: return ""
@@ -91,16 +91,14 @@ def clean_text(text):
     if text.strip().lower() == 'nan': return ""
     return text.strip()
 
-# --- 3. [로직 분리] 웹 화면용 HTML 생성 함수 ---
+# --- 3. [웹 화면용] HTML 생성 함수 ---
 def make_web_html(row):
-    """웹 화면을 위해 <br> 태그 사용"""
     academy = clean_text(row['학원']).replace('\\n', '<br>').replace('\n', '<br>')
     subject = clean_text(row['과목']).replace('\\n', '<br>').replace('\n', '<br>')
     course = clean_text(row['강좌구분']).replace('\\n', '<br>').replace('\n', '<br>')
     
     if not academy and not subject: return ""
     
-    # 과목 표시 여부
     subj_disp = subject if row['영역'] not in ['국어', '수학', '영어', '한국사'] else ""
     
     html_parts = []
@@ -110,10 +108,8 @@ def make_web_html(row):
     
     return "<br>".join(html_parts)
 
-# --- 4. [로직 분리] 엑셀용 텍스트 생성 함수 ---
+# --- 4. [엑셀용] 텍스트 생성 함수 ---
 def make_excel_text(row):
-    """엑셀 다운로드를 위해 \\n 사용"""
-    # 여기서 정규식을 써서 \\n, \n 모두 실제 엔터키로 통일
     academy = re.sub(r'\\+n', '\n', clean_text(row['학원']))
     subject = re.sub(r'\\+n', '\n', clean_text(row['과목']))
     course = re.sub(r'\\+n', '\n', clean_text(row['강좌구분']))
@@ -129,7 +125,7 @@ def make_excel_text(row):
     
     return "\n".join(text_parts)
 
-# --- 5. 엑셀 다운로드 (단순 목록) ---
+# --- 5. 엑셀 다운로드 (목록) ---
 @st.cache_data
 def convert_df_to_excel(df, index=False): 
     output = io.BytesIO()
@@ -137,7 +133,7 @@ def convert_df_to_excel(df, index=False):
         df.to_excel(writer, index=index, sheet_name='Sheet1') 
     return output.getvalue()
 
-# --- 6. [핵심] 통합 그리드 엑셀 생성 (독립 로직) ---
+# --- 6. [핵심] 통합 그리드 엑셀 생성 ---
 @st.cache_data
 def generate_area_grid_excel_v2(filtered_data, mapping_df, hardcoded_area_order):
     output = io.BytesIO()
@@ -155,12 +151,10 @@ def generate_area_grid_excel_v2(filtered_data, mapping_df, hardcoded_area_order)
             start_row = 0 
             df_area = filtered_data[filtered_data['영역'] == area]
             
-            # 과목 정렬
             map_subjs = list(mapping_df[mapping_df['영역'] == area]['선택과목'].unique())
             subj_order = {s: i for i, s in enumerate(map_subjs)}
             all_subjs = sorted(df_area['과목'].unique(), key=lambda s: (subj_order.get(s, 99), s))
             
-            # 강사 정렬
             inst_dict = df_area.groupby('과목')['강사'].unique().to_dict()
             inst_list = []
             for s in all_subjs:
@@ -170,54 +164,44 @@ def generate_area_grid_excel_v2(filtered_data, mapping_df, hardcoded_area_order)
             if not inst_list: continue
             
             ws = wb.add_worksheet(area)
-            ws.set_column(0, 0, 10) # 시간대
-            ws.set_column(1, 7, 22) # 요일
+            ws.set_column(0, 0, 10) 
+            ws.set_column(1, 7, 22)
             
             for inst in inst_list:
                 ws.write(start_row, 0, f"🗓️ {inst} 강사 시간표", title_fmt)
                 start_row += 1
                 
-                # 해당 강사 데이터
                 inst_data = df_area[df_area['강사'] == inst].copy()
-                
-                # [중요] 엑셀용 텍스트 생성 함수 적용
                 inst_data['cell_text'] = inst_data.apply(make_excel_text, axis=1)
                 
-                # Pivot
-                # 같은 시간대에 수업이 여러 개일 수 있으므로 join
+                # [수정] 피벗 시 fill_value="" 추가하여 NaN 방지
                 piv = inst_data.pivot_table(
                     index='시간대', columns='요일', values='cell_text', 
-                    aggfunc=lambda x: "\n\n".join(x) if len(x)>0 else ""
+                    aggfunc=lambda x: "\n\n".join(x) if len(x)>0 else "",
+                    fill_value=""
                 )
                 
-                # Reindex (틀 고정)
                 piv = piv.reindex(index=['오전', '오후', '저녁'], columns=['월', '화', '수', '목', '금', '토', '일'], fill_value="")
+                piv = piv.fillna("") # 최종 방어
                 piv = piv.reset_index()
                 
-                # 헤더 쓰기
                 cols = ['시간대', '월', '화', '수', '목', '금', '토', '일']
-                for c, name in enumerate(cols):
-                    ws.write(start_row, c, name, head_fmt)
+                for c, name in enumerate(cols): ws.write(start_row, c, name, head_fmt)
                 
-                # 데이터 쓰기
                 for r in range(len(piv)):
-                    # 시간대
                     time_val = piv.iloc[r]['시간대']
                     ws.write(start_row + 1 + r, 0, time_val, time_fmt)
                     
-                    # 요일별 데이터
                     max_nl = 0
                     for c_idx, day in enumerate(['월', '화', '수', '목', '금', '토', '일'], start=1):
                         val = str(piv.iloc[r][day])
-                        if val == 'nan': val = ""
-                        
+                        if val == 'nan': val = "" # 문자열 'nan' 방어
                         max_nl = max(max_nl, val.count('\n'))
                         ws.write_string(start_row + 1 + r, c_idx, val, cell_fmt)
                     
-                    # 높이 조절
                     ws.set_row(start_row + 1 + r, 60 + (max_nl * 16))
                 
-                start_row += 3 + len(piv) # 간격
+                start_row += 3 + len(piv)
                 
     return output.getvalue()
 
@@ -318,8 +302,6 @@ if 'selected_instructor' not in st.session_state: st.session_state.selected_inst
 if 'main_view' not in st.session_state: st.session_state.main_view = "전체 출강 현황"
 
 ys = sorted(m_df['연도'].astype(str).unique(), reverse=True)
-
-# [수정] 드롭박스 위치 정렬 (st.columns 한 번 호출)
 cols = st.columns([1,1,4])
 y_sel = cols[0].selectbox("연도", ys, index=0, key="y_sel")
 
@@ -372,31 +354,23 @@ else:
             inst = st.session_state.selected_instructor
             st.header(f"🗓️ {inst} 강사 시간표")
             
-            # 해당 강사 데이터
             inst_d = data[data['강사']==inst].copy()
-            
-            # [중요] 웹 화면 전용 텍스트 생성
             inst_d['web_html'] = inst_d.apply(make_web_html, axis=1)
             
-            # Pivot (웹용)
-            # 같은 시간대 여러 수업일 경우 <br><br>로 연결
+            # [수정] fill_value="" 추가하여 NaN 방지
             piv = inst_d.pivot_table(
                 index='시간대', columns='요일', values='web_html', 
-                aggfunc=lambda x: "<br><br>".join(x) if len(x)>0 else ""
+                aggfunc=lambda x: "<br><br>".join(x) if len(x)>0 else "",
+                fill_value=""
             )
             
-            # Reindex (틀 고정)
-            frame_days = ['월', '화', '수', '목', '금', '토', '일']
-            frame_times = ['오전', '오후', '저녁']
+            disp = piv.reindex(index=['오전', '오후', '저녁'], columns=['월', '화', '수', '목', '금', '토', '일'], fill_value="")
             
-            disp = piv.reindex(index=frame_times, columns=frame_days, fill_value="")
-            
-            # [수정] 유령 컬럼('요일') 제거를 위해 컬럼 이름 초기화
+            # [수정] 유령 컬럼 방지 + NaN 최종 확인 사살
             disp.columns.name = None 
+            disp = disp.fillna("")
             
-            # 인덱스(시간대)를 컬럼으로 빼기
             disp = disp.reset_index()
-            
             st.markdown(disp.to_html(escape=False, index=False, classes="timetable-grid"), unsafe_allow_html=True)
             
             st.divider()
